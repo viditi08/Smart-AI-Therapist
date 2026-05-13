@@ -14,15 +14,17 @@ export default async function SessionPage() {
 
   return (
     <div className="voice-chat-page">
-      <Link className="voice-chat-page-back" href="/">
-        ← Back to Emma
-      </Link>
+      <div className="voice-chat-page-toolbar">
+        <Link className="voice-chat-page-back" href="/">
+          ← Back
+        </Link>
+        <Link className="voice-chat-page-dashboard" href="/account">
+          Dashboard
+        </Link>
+      </div>
       {!session?.user ? (
         <div className="session-auth-banner" role="region" aria-label="Sign in">
-          <p className="session-auth-banner-text">
-            <strong>Sign in with Google</strong> to save conversations to your account and
-            open them from any device.
-          </p>
+          <p className="session-auth-banner-text">Sign in to save chats to your account.</p>
           <Link
             className="btn btn-google session-auth-banner-btn"
             href="/login?callbackUrl=/session"

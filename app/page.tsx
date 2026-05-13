@@ -54,9 +54,6 @@ export default function HomePage() {
             <a className="btn btn-ghost header-demo" href="#cta">
               Book a demo
             </a>
-            <Link className="btn btn-primary" href="/session">
-              Start voice session
-            </Link>
           </div>
         </div>
       </header>
