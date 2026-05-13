@@ -6,6 +6,7 @@ import {
   getSavedSession,
   type SavedSessionRecord,
 } from "@/lib/session-history-storage";
+import { isBrowserLocalSessionId } from "@/lib/validate-chat-messages";
 
 type Props = { sessionId: string };
 
@@ -16,10 +17,32 @@ export function SavedSessionViewer({ sessionId }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
-      const found = getSavedSession(sessionId);
-      if (!cancelled) setRecord(found ?? null);
+      if (isBrowserLocalSessionId(sessionId)) {
+        const found = getSavedSession(sessionId);
+        if (!cancelled) setRecord(found ?? null);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/chats/${encodeURIComponent(sessionId)}`, {
+          credentials: "same-origin",
+        });
+        if (cancelled) return;
+        if (res.ok) {
+          const data = (await res.json()) as SavedSessionRecord;
+          setRecord(data);
+          return;
+        }
+      } catch {
+        if (!cancelled) setRecord(null);
+        return;
+      }
+
+      if (!cancelled) setRecord(null);
     })();
+
     return () => {
       cancelled = true;
     };
@@ -27,46 +50,41 @@ export function SavedSessionViewer({ sessionId }: Props) {
 
   if (record === undefined) {
     return (
-      <div className="auth-shell">
-        <div className="auth-card auth-card-wide">
-          <p className="text-muted">Loading…</p>
-        </div>
+      <div className="dashboard-panel">
+        <p className="text-muted">Loading…</p>
       </div>
     );
   }
 
   if (!record) {
     return (
-      <div className="auth-shell">
-        <div className="auth-card auth-card-wide">
-          <Link className="auth-back" href="/account">
-            ← Back to account
-          </Link>
-          <h1 className="auth-title">Conversation not found</h1>
-          <p className="auth-lead text-muted">
-            It may have been deleted or saved under a different Google account on this
-            browser.
-          </p>
-        </div>
+      <div className="dashboard-panel">
+        <Link className="dashboard-back-link" href="/account">
+          ← Back to dashboard
+        </Link>
+        <h1 className="dashboard-page-title">Conversation not found</h1>
+        <p className="dashboard-page-lead text-muted">
+          It may have been deleted, or it was saved on another device or browser. Try the
+          list from your dashboard.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card auth-card-wide saved-session-view">
-        <Link className="auth-back" href="/account">
-          ← Back to saved conversations
-        </Link>
-        <h1 className="auth-title saved-session-view-title">{record.title}</h1>
-        <p className="saved-session-view-savedat text-muted">
-          Saved{" "}
-          {new Date(record.savedAt).toLocaleString(undefined, {
-            dateStyle: "full",
-            timeStyle: "short",
-          })}
-        </p>
-        <div className="saved-session-view-thread" role="log">
+    <div className="dashboard-panel dashboard-panel-thread">
+      <Link className="dashboard-back-link" href="/account">
+        ← Back to saved conversations
+      </Link>
+      <h1 className="dashboard-thread-title">{record.title}</h1>
+      <p className="dashboard-thread-meta text-muted">
+        Saved{" "}
+        {new Date(record.savedAt).toLocaleString(undefined, {
+          dateStyle: "full",
+          timeStyle: "short",
+        })}
+      </p>
+      <div className="saved-session-view-thread" role="log">
           {record.messages.map((msg) => (
             <div
               key={msg.id}
@@ -81,7 +99,6 @@ export function SavedSessionViewer({ sessionId }: Props) {
             </div>
           ))}
         </div>
-      </div>
     </div>
   );
 }

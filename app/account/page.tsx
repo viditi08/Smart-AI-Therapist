@@ -1,60 +1,54 @@
 import Image from "next/image";
-import Link from "next/link";
 import { auth } from "@/auth";
-import { logout } from "@/components/auth-actions";
 import { SavedSessionsDashboard } from "@/components/saved-sessions-dashboard";
 
 export default async function AccountPage() {
   const session = await auth();
-
   if (!session?.user) {
     return null;
   }
-
   const { user } = session;
 
   return (
-    <div className="auth-shell">
-      <div className="auth-card auth-card-wide">
-        <Link className="auth-back" href="/">
-          ← Back to Emma
-        </Link>
-        <h1 className="auth-title">Your account</h1>
-        <p className="auth-lead">Signed in with Google.</p>
+    <>
+      <header className="dashboard-page-header">
+        <p className="dashboard-page-eyebrow">Overview</p>
+        <h1 className="dashboard-page-title">Dashboard</h1>
+        <p className="dashboard-page-lead text-muted">
+          Saved conversations and profile — a calmer layout than the public marketing site.
+        </p>
+      </header>
 
-        <div className="account-profile">
+      <section className="dashboard-card dashboard-card-profile" aria-labelledby="dash-profile-heading">
+        <h2 id="dash-profile-heading" className="dashboard-card-title">
+          Profile
+        </h2>
+        <div className="dashboard-profile-row">
           {user.image ? (
             <Image
               src={user.image}
               alt=""
-              width={72}
-              height={72}
-              className="account-avatar"
+              width={80}
+              height={80}
+              className="dashboard-profile-avatar"
               unoptimized
             />
           ) : (
-            <div className="account-avatar account-avatar-fallback" aria-hidden>
+            <div className="dashboard-profile-avatar dashboard-profile-avatar-fallback" aria-hidden>
               {(user.name ?? user.email ?? "?").slice(0, 1).toUpperCase()}
             </div>
           )}
-          <div className="account-meta">
-            {user.name && <p className="account-name">{user.name}</p>}
-            {user.email && (
-              <p className="account-email text-muted">{user.email}</p>
-            )}
+          <div className="dashboard-profile-meta">
+            {user.name ? <p className="dashboard-profile-name">{user.name}</p> : null}
+            {user.email ? (
+              <p className="dashboard-profile-email text-muted">{user.email}</p>
+            ) : null}
+            <p className="dashboard-profile-provider text-muted">Signed in with Google</p>
           </div>
         </div>
+      </section>
 
-        <SavedSessionsDashboard />
-
-        <div className="account-actions">
-          <form action={logout}>
-            <button type="submit" className="btn btn-outline btn-lg">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
+      <SavedSessionsDashboard />
+    </>
   );
 }

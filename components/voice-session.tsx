@@ -200,6 +200,43 @@ export function VoiceSession() {
 
   const handleSaveConversation = useCallback(async () => {
     setSaveBanner(null);
+    const trimmed = messages
+      .map((m) => ({ ...m, text: m.text.trim() }))
+      .filter((m) => m.text.length > 0);
+
+    const authRes = await fetch("/api/auth/session", {
+      credentials: "same-origin",
+    }).catch(() => null);
+    const authJson = authRes?.ok
+      ? ((await authRes.json()) as { user?: { id?: string } })
+      : {};
+    const userId = authJson.user?.id;
+
+    if (userId) {
+      try {
+        const res = await fetch("/api/chats", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: trimmed }),
+        });
+        const raw: unknown = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = raw as { error?: string };
+          setError(err.error ?? `Save failed (${res.status})`);
+          return;
+        }
+        setError(null);
+        setSaveBanner(
+          "Saved to your account. Open Dashboard to read this conversation on any device where you are signed in.",
+        );
+        return;
+      } catch {
+        setError("Could not reach the server to save — try again.");
+        return;
+      }
+    }
+
     const result = saveConversation(messages);
     if (!result.ok) {
       setError(result.error);
@@ -207,7 +244,7 @@ export function VoiceSession() {
     }
     setError(null);
     setSaveBanner(
-      "Saved on this device. Open Dashboard (Account) to read it again — sign in if prompted.",
+      "Saved on this device only. Sign in with Google and save again to keep a copy in your account.",
     );
   }, [messages]);
 

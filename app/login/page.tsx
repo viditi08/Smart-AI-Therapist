@@ -1,8 +1,12 @@
 import Link from "next/link";
+import { GoogleGlyph } from "@/components/google-glyph";
+import { signInErrorMessage } from "@/lib/auth-sign-in-errors";
+import { isDatabaseUrlConfigured } from "@/lib/database-env";
+import { isGoogleOAuthConfigured } from "@/lib/google-auth-env";
 import { loginWithGoogle } from "./actions";
 
 type Props = {
-  searchParams: Promise<{ callbackUrl?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 };
 
 export default async function LoginPage({ searchParams }: Props) {
@@ -16,6 +20,15 @@ export default async function LoginPage({ searchParams }: Props) {
     redirectTo = sp.callbackUrl;
   }
 
+  const oauthReady = isGoogleOAuthConfigured();
+  const dbReady = isDatabaseUrlConfigured();
+  const canSignIn = oauthReady;
+  const signInError = signInErrorMessage(
+    typeof sp.error === "string" ? sp.error : undefined,
+  );
+  const showGoogleHint = !oauthReady && !signInError;
+  const showDbHint = !dbReady && !signInError;
+
   return (
     <div className="auth-shell">
       <div className="auth-card">
@@ -24,12 +37,68 @@ export default async function LoginPage({ searchParams }: Props) {
         </Link>
         <h1 className="auth-title">Log in</h1>
         <p className="auth-lead">
-          Continue with Google to save your profile and unlock voice-to-voice
-          sessions with Emma.
+          Use your <strong>Google account</strong> — same flow as “Sign in with Google” on
+          other apps. After you continue, you will be signed in here and can save chats to
+          your account.
         </p>
+
+        {signInError ? (
+          <p className="auth-alert auth-alert-error" role="alert">
+            {signInError}
+          </p>
+        ) : null}
+
+        {showGoogleHint ? (
+          <div className="auth-alert auth-alert-warn" role="status">
+            <p>
+              Google sign-in is not configured on this server yet. Add{" "}
+              <code className="env-code">AUTH_GOOGLE_ID</code> and{" "}
+              <code className="env-code">AUTH_GOOGLE_SECRET</code> from{" "}
+              <a
+                href="https://console.cloud.google.com/apis/credentials"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Google Cloud Console
+              </a>{" "}
+              (OAuth client ID, type Web application) plus{" "}
+              <code className="env-code">AUTH_SECRET</code> in{" "}
+              <code className="env-code">.env.local</code> (not only in{" "}
+              <code className="env-code">.env.example</code>). See{" "}
+              <code className="env-code">.env.example</code> for the full list.
+            </p>
+            <p className="auth-alert-sub">
+              Until then, <strong>Continue with Google</strong> stays disabled — you will not
+              see Google&apos;s sign-in page. After saving <code className="env-code">.env.local</code>,{" "}
+              <strong>restart the dev server</strong> (stop <code className="env-code">npm run dev</code> and
+              start it again) so Next.js picks up the new variables.
+            </p>
+          </div>
+        ) : null}
+
+        {showDbHint ? (
+          <div className="auth-alert auth-alert-warn" role="status">
+            <p>
+              <strong>DATABASE_URL</strong> is not set. You can still sign in with Google;
+              your session will work, but <strong>saving chats to your account</strong> needs
+              PostgreSQL. Add <code className="env-code">DATABASE_URL</code> to{" "}
+              <code className="env-code">.env.local</code> (see{" "}
+              <code className="env-code">.env.example</code>), run{" "}
+              <code className="env-code">docker compose up -d</code> and{" "}
+              <code className="env-code">npx prisma migrate deploy</code>, then restart{" "}
+              <code className="env-code">npm run dev</code>.
+            </p>
+          </div>
+        ) : null}
+
         <form action={loginWithGoogle}>
           <input type="hidden" name="redirectTo" value={redirectTo} />
-          <button type="submit" className="btn btn-google btn-lg">
+          <button
+            type="submit"
+            className="btn btn-google btn-lg"
+            disabled={!canSignIn}
+            aria-disabled={!canSignIn}
+          >
             <GoogleGlyph />
             Continue with Google
           </button>
@@ -40,34 +109,5 @@ export default async function LoginPage({ searchParams }: Props) {
         </p>
       </div>
     </div>
-  );
-}
-
-function GoogleGlyph() {
-  return (
-    <svg
-      className="google-glyph"
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      aria-hidden
-    >
-      <path
-        fill="#4285F4"
-        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-      />
-      <path
-        fill="#EA4335"
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-      />
-    </svg>
   );
 }

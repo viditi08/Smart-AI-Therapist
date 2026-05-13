@@ -5,3 +5,5 @@ dist
 .DS_Store
 *.local
 .env*.local
+prisma/*.db
+prisma/*.db-journal
