@@ -7,21 +7,6 @@ Conversational, therapy-style support with **Emma**: voice-first sessions powere
 
 Emma is **not** a substitute for emergency services, diagnosis, or care from a licensed clinician.
 
----
-
-## Where to put environment variables
-
-| Variable | **Vercel** (Project → Settings → Environment Variables) | **`.env.local`** (local only, gitignored) | **Neon** | **Google Cloud Console** |
-|----------|----------------------------------------------------------|--------------------------------------------|----------|----------------------------|
-| `DATABASE_URL` | Yes (production) | Yes | Copy connection string from **Dashboard → Connect** | — |
-| `AUTH_SECRET` | Yes | Yes | — | — |
-| `AUTH_GOOGLE_ID` | Yes | Yes | — | **Credentials** → OAuth Web client → Client ID |
-| `AUTH_GOOGLE_SECRET` | Yes | Yes | — | Same client → Client secret |
-| `GEMINI_API_KEY` | Yes | Yes | — | [Google AI Studio](https://aistudio.google.com/apikey) (not Cloud “Credentials”) |
-| `AUTH_URL` | Yes (`https://smart-ai-therapist.vercel.app`, no trailing slash) | `http://localhost:3000` for local | — | — |
-| `AUTH_TRUST_HOST` | `true` | Optional `true` | — | — |
-
-**Google OAuth (not in the Vercel table):** in the same Web client, set **Authorized redirect URIs** and **Authorized JavaScript origins** (see [Google OAuth](#google-oauth) below).
 
 ---
 
