@@ -1,0 +1,843 @@
+"use client";
+
+import type {
+  LiveConnectConfig,
+  LiveServerMessage,
+  Session,
+} from "@google/genai/web";
+import { GoogleGenAI, MediaResolution, Modality, StartSensitivity } from "@google/genai/web";
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  isGeminiLiveTokenResponse,
+  type GeminiLiveTokenErrorBody,
+} from "@/lib/gemini-voice-session";
+import { getEmmaLiveSystemInstruction } from "@/lib/emma-live";
+import {
+  saveConversation,
+} from "@/lib/session-history-storage";
+
+type Status =
+  | "idle"
+  | "token"
+  | "connecting"
+  | "live"
+  | "stopping"
+  | "error";
+
+type ChatRole = "user" | "emma";
+
+export type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  text: string;
+};
+
+function appendToRole(
+  prev: ChatMessage[],
+  role: ChatRole,
+  fragment: string,
+): ChatMessage[] {
+  if (!fragment) return prev;
+  const last = prev.at(-1);
+  if (last?.role === role) {
+    return prev.map((m, i) =>
+      i === prev.length - 1 ? { ...m, text: m.text + fragment } : m,
+    );
+  }
+  return [
+    ...prev,
+    {
+      id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      role,
+      text: fragment,
+    },
+  ];
+}
+
+function resampleFloat32(
+  input: Float32Array,
+  inputRate: number,
+  outputRate: number,
+): Float32Array {
+  if (inputRate === outputRate) return input;
+  const ratio = inputRate / outputRate;
+  const outLen = Math.max(1, Math.floor(input.length / ratio));
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const src = i * ratio;
+    const i0 = Math.floor(src);
+    const i1 = Math.min(i0 + 1, input.length - 1);
+    const t = src - i0;
+    out[i] = input[i0]! * (1 - t) + input[i1]! * t;
+  }
+  return out;
+}
+
+function floatToPcm16(float32: Float32Array): ArrayBuffer {
+  const buf = new ArrayBuffer(float32.length * 2);
+  const view = new DataView(buf);
+  for (let i = 0; i < float32.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32[i]!));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
+}
+
+/** Base64 for Gemini Live `audio: { data, mimeType }` (not a DOM Blob). */
+function bytesToBase64(buffer: ArrayBuffer): string {
+  const u8 = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < u8.length; i++) {
+    binary += String.fromCharCode(u8[i]!);
+  }
+  return btoa(binary);
+}
+
+function decodeBase64ToInt16(b64: string): Int16Array {
+  const bin = atob(b64);
+  const buf = new ArrayBuffer(bin.length);
+  const u8 = new Uint8Array(buf);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Int16Array(buf, 0, bin.length / 2);
+}
+
+const WELCOME_MESSAGES: ChatMessage[] = [
+  {
+    id: "welcome",
+    role: "emma",
+    text: `Hi — I'm Emma. I'll stay in a therapist-style conversation with you: listening, reflecting, asking gentle questions, and helping you notice patterns — without diagnosing or replacing a real therapist or crisis services.
+
+Whenever you're ready, you can start with something like:
+• "I've been feeling…"
+• "Something happened and I can't let it go."
+• "I'd like help with anxiety around…"
+
+Tap Start voice session to talk, or type once we're connected — we'll go at your pace.`,
+  },
+];
+
+/** Used only if `/api/gemini/live-token` omits `connectConfig` (older deploy). Mirrors cookbook Live config. */
+const FALLBACK_LIVE_CONNECT_CONFIG: LiveConnectConfig = {
+  responseModalities: [Modality.AUDIO],
+  mediaResolution: MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+  systemInstruction: getEmmaLiveSystemInstruction(),
+  speechConfig: {
+    voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } },
+    languageCode: "en-US",
+  },
+  inputAudioTranscription: {},
+  outputAudioTranscription: {},
+  realtimeInputConfig: {
+    automaticActivityDetection: {
+      prefixPaddingMs: 120,
+      silenceDurationMs: 550,
+      startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_HIGH,
+    },
+  },
+  contextWindowCompression: {
+    triggerTokens: "104857",
+    slidingWindow: {
+      targetTokens: "52428",
+    },
+  },
+};
+
+export function VoiceSession() {
+  const formId = useId();
+  const [status, setStatus] = useState<Status>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>(WELCOME_MESSAGES);
+  const [draft, setDraft] = useState("");
+  const [saveBanner, setSaveBanner] = useState<string | null>(null);
+
+  const sessionRef = useRef<Session | null>(null);
+  const micCtxRef = useRef<AudioContext | null>(null);
+  const micTapNodeRef = useRef<AudioNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const muteRef = useRef<GainNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const nextPlayRef = useRef(0);
+  const outCtxRef = useRef<AudioContext | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const micMutedRef = useRef(false);
+  const [micMuted, setMicMuted] = useState(false);
+  /** Mic graph is running (getUserMedia + worklet or legacy tap). Voice UI only when true. */
+  const [micReady, setMicReady] = useState(false);
+
+  /** True while user clicked End session / unmount cleanup — suppresses "disconnected" noise. */
+  const voluntarySessionEndRef = useRef(false);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => scrollToBottom());
+    return () => cancelAnimationFrame(id);
+  }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    if (!saveBanner) return;
+    const t = window.setTimeout(() => setSaveBanner(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [saveBanner]);
+
+  const canSaveConversation = useMemo(
+    () => messages.some((m) => m.id !== "welcome" && m.text.trim().length > 0),
+    [messages],
+  );
+
+  const handleSaveConversation = useCallback(async () => {
+    setSaveBanner(null);
+    const result = saveConversation(messages);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setError(null);
+    setSaveBanner(
+      "Saved on this device. Open Dashboard (Account) to read it again — sign in if prompted.",
+    );
+  }, [messages]);
+
+  const stopMic = useCallback(() => {
+    micTapNodeRef.current?.disconnect();
+    micSourceRef.current?.disconnect();
+    muteRef.current?.disconnect();
+    micTapNodeRef.current = null;
+    micSourceRef.current = null;
+    muteRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    void micCtxRef.current?.close();
+    micCtxRef.current = null;
+  }, []);
+
+  const stopAll = useCallback(() => {
+    voluntarySessionEndRef.current = true;
+    stopMic();
+    micMutedRef.current = false;
+    setMicMuted(false);
+    setMicReady(false);
+    try {
+      sessionRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    sessionRef.current = null;
+    nextPlayRef.current = 0;
+    void outCtxRef.current?.close();
+    outCtxRef.current = null;
+    setStatus("idle");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `end-${Date.now()}`,
+        role: "emma",
+        text: "Session ended. Start again whenever you'd like.",
+      },
+    ]);
+  }, [stopMic]);
+
+  useEffect(() => {
+    return () => {
+      voluntarySessionEndRef.current = true;
+      stopMic();
+      try {
+        sessionRef.current?.close();
+      } catch {
+        /* ignore */
+      }
+      sessionRef.current = null;
+      void outCtxRef.current?.close();
+      outCtxRef.current = null;
+    };
+  }, [stopMic]);
+
+  const playPcmBase64 = useCallback((b64: string) => {
+    const int16 = decodeBase64ToInt16(b64);
+    if (!outCtxRef.current) {
+      outCtxRef.current = new AudioContext();
+      nextPlayRef.current = outCtxRef.current.currentTime;
+      void outCtxRef.current.resume();
+    }
+    const ctx = outCtxRef.current;
+    const buffer = ctx.createBuffer(1, int16.length, 24000);
+    const ch = buffer.getChannelData(0);
+    for (let i = 0; i < int16.length; i++) {
+      ch[i] = int16[i]! / 32768;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    const start = Math.max(ctx.currentTime, nextPlayRef.current);
+    src.start(start);
+    nextPlayRef.current = start + buffer.duration;
+  }, []);
+
+  const handleServerMessage = useCallback(
+    (msg: LiveServerMessage) => {
+      const sc = msg.serverContent;
+      if (sc?.interrupted) {
+        nextPlayRef.current = outCtxRef.current?.currentTime ?? 0;
+      }
+      if (sc?.inputTranscription?.text) {
+        setMessages((m) => appendToRole(m, "user", sc.inputTranscription!.text!));
+      }
+      if (sc?.outputTranscription?.text) {
+        setMessages((m) =>
+          appendToRole(m, "emma", sc.outputTranscription!.text!),
+        );
+      }
+      const parts = sc?.modelTurn?.parts;
+      if (parts) {
+        for (const part of parts) {
+          const mime = part.inlineData?.mimeType ?? "";
+          const data = part.inlineData?.data;
+          if (data && mime.includes("audio")) {
+            playPcmBase64(data);
+          }
+          if (part.text) {
+            setMessages((m) => appendToRole(m, "emma", part.text!));
+          }
+        }
+      }
+    },
+    [playPcmBase64],
+  );
+
+  const startMic = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        channelCount: 1,
+      },
+    });
+    streamRef.current = stream;
+    const micCtx = new AudioContext();
+    micCtxRef.current = micCtx;
+    await micCtx.resume();
+    const source = micCtx.createMediaStreamSource(stream);
+    micSourceRef.current = source;
+
+    const inputRate = micCtx.sampleRate;
+    const minInputSamples = 4096;
+    let acc = new Float32Array(0);
+
+    const flushInputBlock = (block: Float32Array) => {
+      const sess = sessionRef.current;
+      if (!sess || micMutedRef.current) return;
+      const resampled = resampleFloat32(block, inputRate, 16000);
+      const pcm = floatToPcm16(resampled);
+      const audio = {
+        mimeType: "audio/pcm;rate=16000",
+        data: bytesToBase64(pcm),
+      };
+      try {
+        sess.sendRealtimeInput({ audio });
+      } catch {
+        /* socket may be closing */
+      }
+    };
+
+    const pushSamples = (chunk: Float32Array) => {
+      const next = new Float32Array(acc.length + chunk.length);
+      next.set(acc, 0);
+      next.set(chunk, acc.length);
+      acc = next;
+      while (acc.length >= minInputSamples) {
+        const block = acc.subarray(0, minInputSamples);
+        acc = acc.slice(minInputSamples);
+        flushInputBlock(block);
+      }
+    };
+
+    const mute = micCtx.createGain();
+    mute.gain.value = 0;
+    muteRef.current = mute;
+
+    let usedWorklet = false;
+    try {
+      const workletUrl = new URL(
+        "/audio/pcm-capture-processor.js",
+        window.location.origin,
+      ).href;
+      await micCtx.audioWorklet.addModule(workletUrl);
+      const workletNode = new AudioWorkletNode(micCtx, "pcm-capture-processor", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: 1,
+      });
+      micTapNodeRef.current = workletNode;
+      workletNode.port.onmessage = (ev: MessageEvent) => {
+        const d = ev.data;
+        if (d instanceof Float32Array && d.length > 0) {
+          pushSamples(d);
+        }
+      };
+      source.connect(workletNode);
+      workletNode.connect(mute);
+      usedWorklet = true;
+    } catch {
+      usedWorklet = false;
+    }
+
+    if (!usedWorklet) {
+      const bufferSize = 4096;
+      const processor = micCtx.createScriptProcessor(bufferSize, 1, 1);
+      micTapNodeRef.current = processor;
+      processor.onaudioprocess = (ev) => {
+        ev.outputBuffer.getChannelData(0).fill(0);
+        const sess = sessionRef.current;
+        if (!sess || micMutedRef.current) return;
+        const input = ev.inputBuffer.getChannelData(0);
+        const resampled = resampleFloat32(input, micCtx.sampleRate, 16000);
+        const pcm = floatToPcm16(resampled);
+        const audio = {
+          mimeType: "audio/pcm;rate=16000",
+          data: bytesToBase64(pcm),
+        };
+        try {
+          sess.sendRealtimeInput({ audio });
+        } catch {
+          /* socket may be closing */
+        }
+      };
+      source.connect(processor);
+      processor.connect(mute);
+    } else {
+      mute.connect(micCtx.destination);
+    }
+
+    if (!usedWorklet) {
+      mute.connect(micCtx.destination);
+    }
+  }, []);
+
+  const sendTypedMessage = useCallback(() => {
+    const text = draft.trim();
+    const sess = sessionRef.current;
+    if (!text) return;
+    if (!sess || status !== "live") {
+      setError(
+        "Not connected — wait until the header shows Live, or tap Start voice session again if the connection dropped.",
+      );
+      return;
+    }
+    setDraft("");
+    setMessages((m) => appendToRole(m, "user", text));
+    try {
+      sess.sendClientContent({
+        turns: { role: "user", parts: [{ text }] },
+        turnComplete: true,
+      });
+    } catch {
+      try {
+        sess.sendRealtimeInput({ text });
+      } catch {
+        setError("Could not send message — try reconnecting.");
+      }
+    }
+  }, [draft, status]);
+
+  const start = useCallback(async () => {
+    voluntarySessionEndRef.current = false;
+    setError(null);
+    setMessages([
+      ...WELCOME_MESSAGES,
+      {
+        id: "pending-connect",
+        role: "emma",
+        text: "Connecting… one moment.",
+      },
+    ]);
+    setStatus("token");
+    try {
+      const res = await fetch("/api/gemini/live-token", {
+        method: "POST",
+        credentials: "include",
+      });
+      const raw: unknown = await res.json();
+      if (!res.ok) {
+        const err = raw as GeminiLiveTokenErrorBody;
+        if (res.status === 401) {
+          setError("Please log in with Google to start a voice session.");
+        } else {
+          setError(err.error ?? `HTTP ${res.status}`);
+        }
+        setStatus("error");
+        setMessages(WELCOME_MESSAGES);
+        return;
+      }
+      if (!isGeminiLiveTokenResponse(raw)) {
+        setError("Invalid token response");
+        setStatus("error");
+        setMessages(WELCOME_MESSAGES);
+        return;
+      }
+      const body = raw;
+      setStatus("connecting");
+      const liveCfg = (body.connectConfig ??
+        FALLBACK_LIVE_CONNECT_CONFIG) as LiveConnectConfig;
+      const ai = new GoogleGenAI({
+        apiKey: body.apiKey,
+        httpOptions: body.httpOptions ?? { apiVersion: "v1alpha" },
+      });
+
+      const liveSession = await ai.live.connect({
+        model: body.model,
+        config: liveCfg,
+        callbacks: {
+          onmessage: (m: LiveServerMessage) => {
+            handleServerMessage(m);
+          },
+          onerror: (ev: ErrorEvent) => {
+            setError(
+              ev.message ||
+                "Live connection warning — you can still try to send. End session and restart if nothing works.",
+            );
+          },
+          onclose: (ev: CloseEvent) => {
+            const voluntary = voluntarySessionEndRef.current;
+            voluntarySessionEndRef.current = false;
+            stopMic();
+            micMutedRef.current = false;
+            setMicMuted(false);
+            setMicReady(false);
+            sessionRef.current = null;
+            setStatus("idle");
+            if (!voluntary) {
+              const code = ev?.code;
+              const reason = (ev?.reason ?? "").trim();
+              const tech =
+                typeof code === "number"
+                  ? ` WebSocket closed with code ${code}${reason ? ` (${reason})` : ""}.`
+                  : "";
+              setError(
+                `Connection closed.${tech} Tap Start voice session again. If this repeats, check GEMINI_API_KEY and your network.`,
+              );
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `dc-${Date.now()}`,
+                  role: "emma",
+                  text: `The live session ended unexpectedly.${tech} Common causes: weak Wi‑Fi, an invalid or expired Gemini API key on the server, VPN/ad‑blockers, or the model being temporarily unavailable. Tap Start voice session to try again.`,
+                },
+              ]);
+            }
+          },
+        },
+      });
+
+      sessionRef.current = liveSession;
+      let micOk = false;
+      try {
+        await startMic();
+        micOk = true;
+        setMicReady(true);
+      } catch (e: unknown) {
+        stopMic();
+        setMicReady(false);
+        setError(
+          e instanceof Error
+            ? `Microphone: ${e.message} — you can still type and send messages below.`
+            : "Microphone unavailable — you can still type and send messages below.",
+        );
+      }
+      {
+        try {
+          let out = outCtxRef.current;
+          if (!out) {
+            out = new AudioContext();
+            outCtxRef.current = out;
+            nextPlayRef.current = out.currentTime;
+          }
+          await out.resume();
+        } catch {
+          /* playback may resume on first audio chunk */
+        }
+      }
+      setStatus("live");
+      micMutedRef.current = false;
+      setMicMuted(false);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === "pending-connect"
+            ? {
+                id: `live-${Date.now()}`,
+                role: "emma",
+                text: micOk
+                  ? "You're connected. I'll stay in a calm, therapist-style rhythm with you. After you speak, tap Pause voice so I can answer cleanly; tap Resume for your next turn. You can type anytime — we'll keep the thread going together."
+                  : "You're connected for text. Allow the mic if you'd like voice too. I'll respond in a supportive, therapist-style way — not clinical care.",
+              }
+            : m,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start");
+      setStatus("error");
+      setMessages(WELCOME_MESSAGES);
+    }
+  }, [handleServerMessage, startMic, stopMic]);
+
+  const stop = useCallback(() => {
+    setStatus("stopping");
+    stopAll();
+  }, [stopAll]);
+
+  const beginVoiceCapture = useCallback(() => {
+    if (!micReady) return;
+    setError(null);
+    micMutedRef.current = false;
+    setMicMuted(false);
+  }, [micReady]);
+
+  const finishVoiceCapture = useCallback(() => {
+    const sess = sessionRef.current;
+    if (!sess || !micReady || micMutedRef.current) return;
+    micMutedRef.current = true;
+    setMicMuted(true);
+    try {
+      sess.sendRealtimeInput({ audioStreamEnd: true });
+    } catch {
+      setError("Could not pause voice — try again.");
+      return;
+    }
+  }, []);
+
+  const busy = status === "token" || status === "connecting" || status === "stopping";
+  const isLive = status === "live";
+
+  return (
+    <div className="voice-chat">
+      <header className="voice-chat-header">
+        <div className="voice-chat-header-top">
+          <div className="voice-chat-header-main">
+            <span className="voice-chat-avatar" aria-hidden>
+              E
+            </span>
+            <div>
+              <h2 className="voice-chat-title">Emma</h2>
+              <p className="voice-chat-sub">
+                Therapy-style conversation · Voice + chat ·{" "}
+                {isLive ? (
+                  <span className="voice-chat-status voice-chat-status-live">
+                    Live
+                  </span>
+                ) : busy ? (
+                  <span className="voice-chat-status">Connecting…</span>
+                ) : (
+                  <span className="voice-chat-status voice-chat-status-idle">
+                    Ready
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="voice-chat-header-actions">
+            {canSaveConversation && (
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => void handleSaveConversation()}
+              >
+                Save conversation
+              </button>
+            )}
+            <Link href="/account" className="btn btn-ghost">
+              Dashboard
+            </Link>
+            {isLive ? (
+              <button type="button" className="btn btn-outline" onClick={stop}>
+                End session
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void start()}
+                disabled={busy}
+              >
+                {status === "idle" || status === "error"
+                  ? "Start voice session"
+                  : "Connecting…"}
+              </button>
+            )}
+            <Link href="/" className="btn btn-ghost">
+              Home
+            </Link>
+          </div>
+        </div>
+        {isLive && (
+          <p className="voice-chat-header-hint">
+            <strong>Pause voice</strong> stops the mic so Emma can reply cleanly;{" "}
+            <strong>End session</strong> closes the live connection (save first if you want
+            a copy).
+          </p>
+        )}
+      </header>
+
+      {saveBanner && (
+        <p className="voice-chat-save-banner" role="status">
+          {saveBanner}
+        </p>
+      )}
+
+      <div className="voice-chat-messages" ref={scrollRef} role="log" aria-live="polite">
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`voice-chat-row voice-chat-row-${msg.role}`}
+          >
+            <div className="voice-chat-bubble">
+              <span className="voice-chat-bubble-label">
+                {msg.role === "user" ? "You" : "Emma"}
+              </span>
+              <p className="voice-chat-bubble-text">{msg.text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {isLive && !micReady && (
+        <div
+          className="voice-chat-mic-strip voice-chat-mic-strip-warn"
+          role="status"
+        >
+          <p className="voice-chat-mic-strip-warn-text">
+            Voice needs microphone access. Check the lock / permissions icon in your
+            browser address bar, reload, and start the session again.{" "}
+            <strong>Text below works now.</strong>
+          </p>
+        </div>
+      )}
+
+      {isLive && micReady && (
+        <div className="voice-chat-mic-strip" role="region" aria-label="Voice to Emma">
+          <div
+            className={`voice-chat-mic-dot ${micMuted ? "voice-chat-mic-dot-muted" : "voice-chat-mic-dot-live"}`}
+            aria-hidden
+          />
+          <div className="voice-chat-mic-strip-main">
+            <div className="voice-chat-mic-strip-text">
+              <strong>
+                {micMuted
+                  ? "Voice to Emma is paused"
+                  : "Voice to Emma is on"}
+              </strong>
+              <span className="voice-chat-mic-strip-hint">
+                {micMuted
+                  ? "Tap Resume voice when you want Emma to hear your next question. Your last utterance was closed so she can reply."
+                  : "Speak anytime. After you finish asking, tap Pause voice so Emma can answer without picking up more noise."}
+              </span>
+            </div>
+            <div className="voice-chat-voice-actions">
+              <button
+                type="button"
+                className="btn btn-outline voice-chat-voice-btn"
+                onClick={finishVoiceCapture}
+                disabled={micMuted}
+              >
+                Pause voice
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary voice-chat-voice-btn"
+                onClick={beginVoiceCapture}
+                disabled={!micMuted}
+              >
+                Resume voice
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer className="voice-chat-composer">
+        {error && <p className="voice-session-error">{error}</p>}
+        {error?.includes("log in") && (
+          <p className="voice-chat-login-row">
+            <Link href="/login?callbackUrl=/session" className="btn btn-primary">
+              Log in with Google
+            </Link>
+          </p>
+        )}
+
+        <form
+          id={formId}
+          className="voice-chat-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            sendTypedMessage();
+          }}
+        >
+          {!isLive && (
+            <p className="voice-chat-composer-hint">
+              You can type your message anytime. Tap <strong>Start voice session</strong>{" "}
+              above, wait for <strong>Live</strong>, then tap Send.
+            </p>
+          )}
+          {isLive && (
+            <p className="voice-chat-composer-hint voice-chat-composer-hint-live">
+              Connected — Send delivers your text to Emma.
+            </p>
+          )}
+          <textarea
+            className="voice-chat-input"
+            rows={2}
+            placeholder={
+              isLive
+                ? "Type your message…"
+                : "Write what you want to say, then start the session and tap Send…"
+            }
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendTypedMessage();
+              }
+            }}
+          />
+          <div className="voice-chat-form-actions">
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={!isLive || !draft.trim()}
+              title={
+                !isLive
+                  ? "Start a voice session and wait for Live first"
+                  : undefined
+              }
+            >
+              Send
+            </button>
+          </div>
+        </form>
+
+        <p className="voice-chat-foot">
+          Gemini Live · not emergency or professional care ·{" "}
+          <a
+            href="https://ai.google.dev/gemini-api/docs/multimodal-live"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            How it works
+          </a>
+        </p>
+      </footer>
+    </div>
+  );
+}
