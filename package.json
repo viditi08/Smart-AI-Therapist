@@ -9,6 +9,7 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "db:migrate": "dotenv -e .env.local -- prisma migrate deploy",
+    "db:migrate:neon": "dotenv -e .env.neon -- prisma migrate deploy",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:studio": "prisma studio"
