@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// Production: managed Postgres (Neon, Supabase, RDS, Vercel Postgres, etc.).
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Auth.js — @auth/prisma-adapter (PostgreSQL / production-shaped)
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @db.Timestamptz(3)
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  chatSessions  ChatSession[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime @db.Timestamptz(3)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime @db.Timestamptz(3)
+
+  @@unique([identifier, token])
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String   @db.VarChar(512)
+  savedAt   DateTime @default(now()) @db.Timestamptz(3)
+  messages  Json /// JSONB in PostgreSQL
+
+  @@index([userId, savedAt])
+}

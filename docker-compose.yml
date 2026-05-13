@@ -1,0 +1,21 @@
+# Local PostgreSQL (matches production engine). From repo root:
+#   docker compose up -d
+# Then set DATABASE_URL in `.env.local` to (note host port 5433):
+#   postgresql://postgres:postgres@localhost:5433/ai_therapist?schema=public
+# Run: npm run db:migrate
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ai_therapist
+    ports:
+      - "5433:5432"
+    volumes:
+      - ai_therapist_pgdata:/var/lib/postgresql/data
+
+volumes:
+  ai_therapist_pgdata:
