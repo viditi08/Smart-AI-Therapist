@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { GoogleGlyph } from "@/components/google-glyph";
-import { VoiceSession } from "@/components/voice-session";
+import { PipecatSession } from "@/components/pipecat-session";
 
 export const metadata = {
   title: "Chat with Emma | Voice session",
   description:
-    "Therapy-style conversation with Emma — voice and text with Gemini Live (not a licensed therapist).",
+    "Therapy-style conversation with Emma — voice-to-voice support (not a licensed therapist).",
 };
 
 export default async function SessionPage() {
   const session = await auth();
+  const localVoice = process.env.NODE_ENV === "development";
 
   return (
     <div className="voice-chat-page">
@@ -37,7 +38,11 @@ export default async function SessionPage() {
           </Link>
         </div>
       ) : null}
-      <VoiceSession />
+      {localVoice ? <PipecatSession /> : (
+        <p className="session-auth-banner" role="status">
+          Voice sessions are currently available in the local app. Online voice sessions are not available yet.
+        </p>
+      )}
     </div>
   );
 }

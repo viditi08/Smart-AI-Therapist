@@ -7,10 +7,10 @@ import type {
 } from "@google/genai/web";
 import { GoogleGenAI, MediaResolution, Modality, StartSensitivity } from "@google/genai/web";
 import Link from "next/link";
+import { VoiceOrb } from "@/components/voice-orb";
 import {
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -113,7 +113,7 @@ const WELCOME_MESSAGES: ChatMessage[] = [
   {
     id: "welcome",
     role: "emma",
-    text: "Hi — I'm Emma, your virtual therapist. When you're ready, start a session and we can talk by voice or text. I'm not a substitute for crisis services or a licensed clinician.",
+    text: "Hi — I'm Emma, your virtual therapist. When you're ready, start a session and we can talk by voice. I'm not a substitute for crisis services or a licensed clinician.",
   },
 ];
 
@@ -144,11 +144,9 @@ const FALLBACK_LIVE_CONNECT_CONFIG: LiveConnectConfig = {
 };
 
 export function VoiceSession() {
-  const formId = useId();
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(WELCOME_MESSAGES);
-  const [draft, setDraft] = useState("");
   const [saveBanner, setSaveBanner] = useState<string | null>(null);
 
   const sessionRef = useRef<Session | null>(null);
@@ -163,7 +161,7 @@ export function VoiceSession() {
   const micMutedRef = useRef(false);
   /** Mic graph is running (getUserMedia + worklet or legacy tap). Voice UI only when true. */
   const [micReady, setMicReady] = useState(false);
-  /** Full break: no mic, no Emma audio playback, no sending text until resumed. */
+  /** Full break: no mic, no Emma audio playback, no audio until resumed. */
   const conversationPausedRef = useRef(false);
   const [conversationPaused, setConversationPaused] = useState(false);
 
@@ -203,9 +201,9 @@ export function VoiceSession() {
       credentials: "same-origin",
     }).catch(() => null);
     const authJson = authRes?.ok
-      ? ((await authRes.json()) as { user?: { id?: string } })
+      ? ((await authRes.json()) as { user?: { id?: string } | null } | null)
       : {};
-    const userId = authJson.user?.id;
+    const userId = authJson?.user?.id;
 
     if (userId) {
       try {
@@ -450,36 +448,6 @@ export function VoiceSession() {
     }
   }, []);
 
-  const sendTypedMessage = useCallback(() => {
-    const text = draft.trim();
-    const sess = sessionRef.current;
-    if (!text) return;
-    if (conversationPausedRef.current) {
-      setError(
-        "Paused — resume the conversation to send.",
-      );
-      return;
-    }
-    if (!sess || status !== "live") {
-      setError("Wait for Live, then send.");
-      return;
-    }
-    setDraft("");
-    setMessages((m) => appendToRole(m, "user", text));
-    try {
-      sess.sendClientContent({
-        turns: { role: "user", parts: [{ text }] },
-        turnComplete: true,
-      });
-    } catch {
-      try {
-        sess.sendRealtimeInput({ text });
-      } catch {
-        setError("Could not send. Reconnect.");
-      }
-    }
-  }, [draft, status]);
-
   const pauseConversation = useCallback(() => {
     const sess = sessionRef.current;
     if (!sess || conversationPausedRef.current) return;
@@ -593,13 +561,13 @@ export function VoiceSession() {
         await startMic();
         setMicReady(true);
       } catch (e: unknown) {
-        stopMic();
-        setMicReady(false);
+        stopAll();
         setError(
           e instanceof Error
-            ? `Mic blocked (${e.message}). Text still works.`
-            : "Mic unavailable. Text still works.",
+            ? `Microphone unavailable (${e.message}). Allow microphone access and start again.`
+            : "Allow microphone access and start again.",
         );
+        return;
       }
       {
         try {
@@ -621,7 +589,7 @@ export function VoiceSession() {
       setStatus("error");
       setMessages(WELCOME_MESSAGES);
     }
-  }, [handleServerMessage, startMic, stopMic]);
+  }, [handleServerMessage, startMic, stopMic, stopAll]);
 
   const stop = useCallback(() => {
     setStatus("stopping");
@@ -706,12 +674,19 @@ export function VoiceSession() {
         </div>
       </header>
 
+      <VoiceOrb
+        state={busy ? "connecting" : isLive ? conversationPaused ? "paused" : "live" : "ready"}
+        action={isLive ? conversationPaused ? "Tap to resume your conversation" : "Tap to pause your conversation" : "Tap the microphone to begin"}
+        onClick={() => { if (isLive) { if (conversationPaused) resumeConversation(); else pauseConversation(); } else void start(); }}
+      />
       {saveBanner && (
         <p className="voice-chat-save-banner" role="status">
           {saveBanner}
         </p>
       )}
 
+      <details className="voice-transcript">
+      <summary>Conversation transcript</summary>
       <div className="voice-chat-messages" ref={scrollRef} role="log" aria-live="polite">
         {messages.map((msg) => (
           <div
@@ -728,13 +703,14 @@ export function VoiceSession() {
         ))}
       </div>
 
+      </details>
       {isLive && !micReady && (
         <div
           className="voice-chat-mic-strip voice-chat-mic-strip-warn"
           role="status"
         >
           <p className="voice-chat-mic-strip-warn-text">
-            Allow the microphone in your browser to use voice. You can still type.
+            Allow the microphone in your browser, then start a voice session.
           </p>
         </div>
       )}
@@ -749,44 +725,11 @@ export function VoiceSession() {
           </p>
         )}
 
-        <form
-          id={formId}
-          className="voice-chat-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            sendTypedMessage();
-          }}
-        >
-          <textarea
-            className="voice-chat-input"
-            rows={2}
-            placeholder={
-              isLive
-                ? conversationPaused
-                  ? "Resume to type…"
-                  : "Message…"
-                : "Message… start session, then Send"
-            }
-            value={draft}
-            disabled={isLive && conversationPaused}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendTypedMessage();
-              }
-            }}
-          />
-          <div className="voice-chat-form-actions">
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!isLive || !draft.trim() || conversationPaused}
-            >
-              Send
-            </button>
-          </div>
-        </form>
+        <p className="voice-chat-sub">
+          {isLive
+            ? conversationPaused ? "Paused. Resume when you’re ready to talk." : "Speak naturally — Emma will respond by voice."
+            : "Start a session and allow microphone access to talk with Emma."}
+        </p>
       </footer>
     </div>
   );

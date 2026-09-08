@@ -3,10 +3,10 @@ import { GoogleGlyph } from "@/components/google-glyph";
 import { signInErrorMessage } from "@/lib/auth-sign-in-errors";
 import { isDatabaseUrlConfigured } from "@/lib/database-env";
 import { isGoogleOAuthConfigured } from "@/lib/google-auth-env";
-import { loginWithGoogle } from "./actions";
+import { loginWithCredentials, loginWithGoogle } from "./actions";
 
 type Props = {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string; created?: string }>;
 };
 
 export default async function LoginPage({ searchParams }: Props) {
@@ -28,6 +28,7 @@ export default async function LoginPage({ searchParams }: Props) {
   );
   const showGoogleHint = !oauthReady && !signInError;
   const showDbHint = !dbReady && !signInError;
+  const basicError = sp.error === "InvalidCredentials" ? "Email or password is incorrect." : sp.error === "DatabaseRequired" ? "Email login needs PostgreSQL. Configure DATABASE_URL first." : null;
 
   return (
     <div className="auth-shell">
@@ -36,11 +37,16 @@ export default async function LoginPage({ searchParams }: Props) {
           ← Back to Emma
         </Link>
         <h1 className="auth-title">Log in</h1>
-        <p className="auth-lead">
-          Use your <strong>Google account</strong> — same flow as “Sign in with Google” on
-          other apps. After you continue, you will be signed in here and can save chats to
-          your account.
-        </p>
+        <p className="auth-lead">Log in with email and password or your Google account.</p>
+        {basicError && <p className="auth-alert auth-alert-error" role="alert">{basicError}</p>}
+        {sp.created && <p className="auth-alert auth-alert-warn" role="status">Account created. You can log in now.</p>}
+        <form action={loginWithCredentials} className="basic-auth-form">
+          <label>Email<input name="email" type="email" autoComplete="email" required /></label>
+          <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+          <input type="hidden" name="redirectTo" value={redirectTo} />
+          <button type="submit" className="btn btn-primary btn-lg">Log in with email</button>
+        </form>
+        <p className="auth-register-link">New here? <Link href={`/register?redirectTo=${encodeURIComponent(redirectTo)}`}>Create an account</Link></p>
 
         {signInError ? (
           <p className="auth-alert auth-alert-error" role="alert">
@@ -103,6 +109,7 @@ export default async function LoginPage({ searchParams }: Props) {
             Continue with Google
           </button>
         </form>
+        <div className="auth-divider" aria-hidden="true"><span>or</span></div>
         <p className="auth-foot">
           By continuing you agree to our approach to privacy and consent around
           AI-assisted support.

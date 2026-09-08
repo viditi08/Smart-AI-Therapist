@@ -1,6 +1,6 @@
 # Emma — AI Therapist (landing + voice)
 
-Conversational, therapy-style support with **Emma**: voice-first sessions powered by **Google Gemini Live**, optional text, **Google sign-in** (Auth.js), and **saved conversations** backed by **PostgreSQL** (Prisma).
+Conversational, therapy-style support with **Emma**: voice-to-voice sessions powered by **Pipecat, Deepgram, NVIDIA, and ElevenLabs**, **Google sign-in** (Auth.js), and **saved conversations** backed by **PostgreSQL** (Prisma).
 
 **Repository:** [github.com/viditi08/Smart-AI-Therapist](https://github.com/viditi08/Smart-AI-Therapist)  
 **Live site:** [https://smart-ai-therapist.vercel.app](https://smart-ai-therapist.vercel.app)
@@ -19,7 +19,7 @@ Emma is **not** a substitute for emergency services, diagnosis, or care from a l
 - [React](https://react.dev/) 19
 - [Auth.js / NextAuth](https://authjs.dev/) v5 — Google OAuth, JWT sessions, optional [Prisma](https://www.prisma.io/) adapter when `DATABASE_URL` is set
 - [Prisma](https://www.prisma.io/) + PostgreSQL — users (via adapter) + `ChatSession` transcripts
-- [@google/genai](https://www.npmjs.com/package/@google/genai) — Gemini Live voice
+- Python + Pipecat — Deepgram transcription, NVIDIA dialogue, and ElevenLabs speech
 
 ---
 
@@ -33,6 +33,9 @@ Emma is **not** a substitute for emergency services, diagnosis, or care from a l
 ---
 
 ## Local development
+
+For the default **Deepgram Flux + NVIDIA + ElevenLabs** local voice experience,
+see [voice-backend/README.md](./voice-backend/README.md).
 
 1. Clone the repo and install dependencies:
 

@@ -24,8 +24,8 @@ export async function getClientSessionEmail(): Promise<string | null> {
   try {
     const res = await fetch("/api/auth/session", { credentials: "same-origin" });
     if (!res.ok) return null;
-    const data = (await res.json()) as { user?: { email?: string | null } | null };
-    const email = data.user?.email?.trim();
+    const data = (await res.json()) as { user?: { email?: string | null } | null } | null;
+    const email = data?.user?.email?.trim();
     return email ? email.toLowerCase() : null;
   } catch {
     return null;

@@ -8,3 +8,7 @@ dist
 .env.neon
 prisma/*.db
 prisma/*.db-journal
+voice-backend/.env
+voice-backend/.venv/
+__pycache__/
+*.pyc
