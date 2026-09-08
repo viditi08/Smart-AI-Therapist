@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { auth } from "@/auth";
 import { GoogleGlyph } from "@/components/google-glyph";
-import { VoiceSession } from "@/components/voice-session";
+import { TextPipelineSession } from "@/components/text-pipeline-session";
 
 export const metadata = {
-  title: "Chat with Emma | Voice session",
+  title: "Emma · Text pipeline (Phase 1)",
   description:
-    "Therapy-style conversation with Emma — voice and text with Gemini Live (not a licensed therapist).",
+    "Production voice engineering foundation — streaming LLM, crisis detection, rolling summaries, turn metrics.",
 };
 
-export default async function SessionPage() {
+export default async function PipelineSessionPage() {
   const session = await auth();
 
   return (
@@ -18,26 +18,25 @@ export default async function SessionPage() {
         <Link className="voice-chat-page-back" href="/">
           ← Back
         </Link>
-        <Link className="voice-chat-page-dashboard" href="/session/pipeline">
-          Text pipeline
-        </Link>
         <Link className="voice-chat-page-dashboard" href="/account">
           Dashboard
         </Link>
       </div>
       {!session?.user ? (
         <div className="session-auth-banner" role="region" aria-label="Sign in">
-          <p className="session-auth-banner-text">Sign in to save chats to your account.</p>
+          <p className="session-auth-banner-text">
+            Sign in to persist pipeline sessions to your account (optional in local dev).
+          </p>
           <Link
             className="btn btn-google session-auth-banner-btn"
-            href="/login?callbackUrl=/session"
+            href="/login?callbackUrl=/session/pipeline"
           >
             <GoogleGlyph />
             Continue with Google
           </Link>
         </div>
       ) : null}
-      <VoiceSession />
+      <TextPipelineSession />
     </div>
   );
 }

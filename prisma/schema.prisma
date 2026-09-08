@@ -17,7 +17,8 @@ model User {
   image         String?
   accounts      Account[]
   sessions      Session[]
-  chatSessions  ChatSession[]
+  chatSessions       ChatSession[]
+  pipelineSessions   PipelineSession[]
 }
 
 model Account {
@@ -67,4 +68,33 @@ model ChatSession {
   messages  Json /// JSONB in PostgreSQL
 
   @@index([userId, savedAt])
+}
+
+/// Active text/voice pipeline session — rolling summary + turn metrics (Phase 1 brain).
+model PipelineSession {
+  id          String               @id @default(cuid())
+  userId      String?
+  user        User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  turnCount   Int                  @default(0)
+  summary     String?              @db.Text
+  messages    Json                 @default("[]")
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime             @updatedAt @db.Timestamptz(3)
+  turnMetrics PipelineTurnMetric[]
+
+  @@index([userId, updatedAt])
+}
+
+model PipelineTurnMetric {
+  id          String          @id @default(cuid())
+  sessionId   String
+  session     PipelineSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  turnNumber  Int
+  crisisLevel String          @default("none") @db.VarChar(32)
+  llmTtftMs   Int?
+  llmTotalMs  Int?
+  totalMs     Int?
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+
+  @@index([sessionId, turnNumber])
 }
