@@ -19,9 +19,6 @@ export default async function SessionPage() {
         <Link className="voice-chat-page-back" href="/">
           ← Back
         </Link>
-        <Link className="voice-chat-page-dashboard" href="/session/pipeline">
-          Text pipeline
-        </Link>
         <Link className="voice-chat-page-dashboard" href="/account">
           Dashboard
         </Link>
