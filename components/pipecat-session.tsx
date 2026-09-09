@@ -6,7 +6,7 @@ import type { PipecatClient } from "@pipecat-ai/client-js";
 import type { ChatMessage } from "@/components/voice-session";
 import { saveConversation } from "@/lib/session-history-storage";
 
-const backend = "http://127.0.0.1:7860";
+const backend = process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL ?? "http://127.0.0.1:7860";
 
 export function PipecatSession() {
   const [status, setStatus] = useState<"idle" | "connecting" | "live">("idle");

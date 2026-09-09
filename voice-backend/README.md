@@ -76,7 +76,8 @@ authentication tied to the existing user session, usage limits, HTTPS, and a
 transport deployment suited to the target network. Vercel's existing Next.js
 deployment does not run this Python process.
 
-If Next.js uses another port, update `FRONTEND_ORIGINS` and restart Python.
+If Next.js uses another port, update `FRONTEND_ORIGINS` and restart Python. For a
+hosted backend, set `NEXT_PUBLIC_PIPECAT_BACKEND_URL` in Vercel to its HTTPS URL.
 If audio playback is blocked, use the visible audio play control. Provider errors
 can indicate invalid keys, inaccessible model/voice IDs, or exhausted quota.
 
