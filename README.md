@@ -52,9 +52,6 @@ Provider defaults are overridable: `LLM_MODEL`, `LLM_BASE_URL`, `DEEPGRAM_MODEL`
 
 ## Local development
 
-For the default **Deepgram Flux + NVIDIA + ElevenLabs** local voice experience,
-see [voice-backend/README.md](./voice-backend/README.md).
-
 1. Clone the repo and install dependencies:
 
    ```bash
