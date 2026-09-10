@@ -101,8 +101,8 @@ export function HomeCtaSection() {
           real time, voice to voice.
         </p>
         <MotionButtonWrap>
-          <Link className="btn btn-primary btn-lg" href="/session">
-            Try a voice session free
+          <Link className="btn btn-primary btn-lg" href="/session/voice">
+            Try voice-to-voice free
           </Link>
         </MotionButtonWrap>
       </motion.div>

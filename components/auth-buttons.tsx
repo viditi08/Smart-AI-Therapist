@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { logout } from "./auth-actions";
 
 export async function AuthButtons() {
-  const session = await auth();
+  const session = await getSession();
 
   if (!session?.user) {
     return (

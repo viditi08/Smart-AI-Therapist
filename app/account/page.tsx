@@ -1,9 +1,9 @@
 import Image from "next/image";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { SavedSessionsDashboard } from "@/components/saved-sessions-dashboard";
 
 export default async function AccountPage() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user) {
     return null;
   }

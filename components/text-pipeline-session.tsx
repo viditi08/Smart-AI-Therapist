@@ -2,14 +2,21 @@
 
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { CrisisModal } from "@/components/crisis-modal";
 import { TypingIndicator } from "@/components/motion/reveal";
+import { SessionOnboarding } from "@/components/session-onboarding";
+import {
+  loadOnboarding,
+  saveOnboarding,
+  type OnboardingAnswers,
+} from "@/lib/onboarding";
+import {
+  createPipelineSession,
+  friendlyFetchError,
+  runPipelineTurn,
+  summarizePipelineSession,
+} from "@/lib/pipeline-client";
 import type { CrisisLevel, TurnMetrics } from "@/lib/pipeline-types";
 import { bubbleIn, metricsPulse, metricValuePop, springBouncy } from "@/lib/motion-presets";
 
@@ -22,27 +29,23 @@ type UiMessage = {
 const WELCOME: UiMessage = {
   id: "welcome",
   role: "emma",
-  text: "Hi — I'm Emma. This is the text pipeline (Phase 1): streaming LLM, crisis detection, rolling summaries every 6 turns, and turn metrics. Type a message to begin.",
+  text: "Hi — I'm Emma. Type a message to test the pipeline brain: streaming LLM, crisis detection, rolling summaries, and turn metrics.",
 };
-
-function parseSseBlock(block: string): { event: string; data: string } | null {
-  let event = "message";
-  let data = "";
-  for (const line of block.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    if (line.startsWith("data:")) data += line.slice(5).trim();
-  }
-  if (!data) return null;
-  return { event, data };
-}
 
 export function TextPipelineSession() {
   const formId = useId();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+
+  const [onboarding, setOnboarding] = useState<OnboardingAnswers | null>(null);
+  const [needsOnboarding, setNeedsOnboarding] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([WELCOME]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [booting, setBooting] = useState(true);
+  const [sessionSummary, setSessionSummary] = useState<string | null>(null);
+  const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastMetrics, setLastMetrics] = useState<TurnMetrics | null>(null);
   const [lastCrisis, setLastCrisis] = useState<{
@@ -62,25 +65,50 @@ export function TextPipelineSession() {
     return () => cancelAnimationFrame(id);
   }, [messages, scrollToBottom]);
 
-  const ensureSession = useCallback(async (): Promise<string> => {
-    if (sessionId) return sessionId;
-    const res = await fetch("/api/pipeline/session", {
-      method: "POST",
-      credentials: "include",
-    });
-    const raw: unknown = await res.json();
-    if (!res.ok) {
-      const err = raw as { error?: string };
-      throw new Error(err.error ?? `HTTP ${res.status}`);
+  useEffect(() => {
+    setOnboarding(loadOnboarding());
+    setNeedsOnboarding(loadOnboarding() === null);
+  }, []);
+
+  useEffect(() => {
+    if (needsOnboarding) {
+      setBooting(false);
+      return;
     }
-    const body = raw as { sessionId: string };
-    setSessionId(body.sessionId);
-    return body.sessionId;
-  }, [sessionId]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const id = await createPipelineSession();
+        if (!cancelled) {
+          sessionIdRef.current = id;
+          setSessionId(id);
+        }
+      } catch (e) {
+        if (!cancelled) setError(friendlyFetchError(e));
+      } finally {
+        if (!cancelled) setBooting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [needsOnboarding]);
 
   const sendMessage = useCallback(async () => {
     const text = draft.trim();
     if (!text || busy) return;
+
+    let sid = sessionIdRef.current;
+    if (!sid) {
+      try {
+        sid = await createPipelineSession();
+        sessionIdRef.current = sid;
+        setSessionId(sid);
+      } catch (e) {
+        setError(friendlyFetchError(e));
+        return;
+      }
+    }
 
     setError(null);
     setDraft("");
@@ -100,86 +128,42 @@ export function TextPipelineSession() {
     ]);
 
     try {
-      const sid = await ensureSession();
-      const res = await fetch("/api/pipeline/turn", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId: sid, message: text }),
-      });
-
-      if (!res.ok) {
-        const err = (await res.json()) as { error?: string };
-        throw new Error(err.error ?? `HTTP ${res.status}`);
-      }
-
-      if (!res.body) throw new Error("No response stream");
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const parsed = parseSseBlock(part);
-          if (!parsed) continue;
-
-          if (parsed.event === "token") {
-            const { text: token } = JSON.parse(parsed.data) as { text: string };
-            setMessages((m) =>
-              m.map((msg) =>
-                msg.id === assistantId
-                  ? { ...msg, text: msg.text + token }
-                  : msg,
-              ),
-            );
-          }
-
-          if (parsed.event === "crisis") {
-            const data = JSON.parse(parsed.data) as {
-              level: CrisisLevel;
-              matched: string[];
-            };
-            setLastCrisis(data);
-          }
-
-          if (parsed.event === "summary") {
-            const data = JSON.parse(parsed.data) as { summary: string };
-            setSummaryPreview(data.summary || null);
-          }
-
-          if (parsed.event === "session") {
-            const data = JSON.parse(parsed.data) as { turnNumber: number };
-            setTurnCount(data.turnNumber);
-          }
-
-          if (parsed.event === "metrics") {
-            setLastMetrics(JSON.parse(parsed.data) as TurnMetrics);
-          }
-
-          if (parsed.event === "error") {
-            const data = JSON.parse(parsed.data) as { message: string };
-            throw new Error(data.message);
-          }
-        }
-      }
+      await runPipelineTurn(
+        {
+          sessionId: sid,
+          message: text,
+          mode: "text",
+          onboarding,
+        },
+        {
+        onToken: (token) => {
+          setMessages((m) =>
+            m.map((msg) =>
+              msg.id === assistantId
+                ? { ...msg, text: msg.text + token }
+                : msg,
+            ),
+          );
+        },
+        onCrisis: (data) =>
+          setLastCrisis({
+            level: data.level as CrisisLevel,
+            matched: data.matched,
+          }),
+        onSummary: (data) => setSummaryPreview(data.summary || null),
+        onSession: (data) => setTurnCount(data.turnNumber),
+        onMetrics: (data) => setLastMetrics(data),
+      },
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Send failed");
+      setError(friendlyFetchError(e));
       setMessages((m) => m.filter((msg) => msg.id !== assistantId));
     } finally {
       setBusy(false);
     }
-  }, [busy, draft, ensureSession]);
+  }, [busy, draft, onboarding]);
 
   const resetSession = useCallback(async () => {
-    setSessionId(null);
     setMessages([WELCOME]);
     setLastMetrics(null);
     setLastCrisis(null);
@@ -187,10 +171,63 @@ export function TextPipelineSession() {
     setTurnCount(0);
     setError(null);
     setDraft("");
+    setSessionSummary(null);
+    try {
+      const id = await createPipelineSession();
+      sessionIdRef.current = id;
+      setSessionId(id);
+    } catch (e) {
+      setError(friendlyFetchError(e));
+    }
   }, []);
+
+  const endSession = useCallback(async () => {
+    const transcript = messages
+      .filter((m) => m.id !== "welcome" && m.text.trim())
+      .map((m) => ({
+        role: m.role === "emma" ? ("assistant" as const) : ("user" as const),
+        content: m.text,
+      }));
+    if (transcript.length === 0) return;
+    setEnding(true);
+    try {
+      const summary = await summarizePipelineSession(transcript);
+      setSessionSummary(summary);
+    } catch (e) {
+      setError(friendlyFetchError(e));
+    } finally {
+      setEnding(false);
+    }
+  }, [messages]);
+
+  if (needsOnboarding) {
+    return (
+      <div className="voice-chat pipeline-chat">
+        <SessionOnboarding
+          onComplete={(answers) => {
+            saveOnboarding(answers);
+            setOnboarding(answers);
+            setNeedsOnboarding(false);
+            setBooting(true);
+          }}
+          onSkip={() => {
+            setOnboarding(null);
+            setNeedsOnboarding(false);
+            setBooting(true);
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="voice-chat pipeline-chat">
+      {lastCrisis && lastCrisis.level !== "none" ? (
+        <CrisisModal
+          level={lastCrisis.level === "elevated" ? "elevated" : "imminent"}
+          onDismiss={() => setLastCrisis(null)}
+        />
+      ) : null}
       <header className="voice-chat-header">
         <div className="voice-chat-header-top">
           <div className="voice-chat-header-main">
@@ -201,7 +238,7 @@ export function TextPipelineSession() {
               <h2 className="voice-chat-title">Emma · Text pipeline</h2>
               <p className="voice-chat-sub">
                 <span className="voice-chat-status voice-chat-status-live">
-                  Phase 1 — streaming brain
+                  {booting ? "Starting…" : "Phase 1 — streaming brain"}
                 </span>
               </p>
             </div>
@@ -215,8 +252,16 @@ export function TextPipelineSession() {
             >
               New session
             </button>
-            <Link href="/session" className="btn btn-ghost">
-              Voice (Live)
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => void endSession()}
+              disabled={busy || ending || turnCount === 0}
+            >
+              {ending ? "Summarizing…" : "End & summarize"}
+            </button>
+            <Link href="/session/voice" className="btn btn-primary">
+              Voice mode
             </Link>
             <Link href="/" className="btn btn-ghost">
               Home
@@ -245,13 +290,6 @@ export function TextPipelineSession() {
                     : "—",
               },
               {
-                label: "LLM total",
-                value:
-                  lastMetrics.llmTotalMs != null
-                    ? `${lastMetrics.llmTotalMs} ms`
-                    : "—",
-              },
-              {
                 label: "E2E",
                 value:
                   lastMetrics.totalMs != null
@@ -273,24 +311,30 @@ export function TextPipelineSession() {
             ))}
           </dl>
         ) : (
-          <p className="pipeline-metrics-empty">Send a message to see latencies.</p>
+          <p className="pipeline-metrics-empty">
+            {booting ? "Starting session…" : "Send a message to see latencies."}
+          </p>
         )}
         <p className="pipeline-metrics-meta">
-          Session: {sessionId ? `${sessionId.slice(0, 12)}…` : "not started"} · Turns: {turnCount}
+          Session: {sessionId ? `${sessionId.slice(0, 12)}…` : "…"} · Turns:{" "}
+          {turnCount}
         </p>
-        {lastCrisis && lastCrisis.level !== "none" ? (
-          <p className="pipeline-crisis-flag" role="status">
-            Crisis layer: {lastCrisis.level}
-            {lastCrisis.matched.length > 0
-              ? ` (${lastCrisis.matched.join(", ")})`
-              : ""}
-          </p>
-        ) : null}
         {summaryPreview ? (
           <details className="pipeline-summary-preview">
             <summary>Rolling summary (turn {turnCount})</summary>
             <p>{summaryPreview}</p>
           </details>
+        ) : null}
+        {sessionSummary ? (
+          <details className="pipeline-summary-preview" open>
+            <summary>Session summary</summary>
+            <p>{sessionSummary}</p>
+          </details>
+        ) : null}
+        {lastCrisis && lastCrisis.level !== "none" ? (
+          <p className="pipeline-crisis-flag" role="status">
+            Crisis: {lastCrisis.level}
+          </p>
         ) : null}
       </motion.aside>
 
@@ -324,14 +368,8 @@ export function TextPipelineSession() {
               variants={bubbleIn}
               initial="hidden"
               animate="visible"
-              exit="exit"
             >
-              <motion.div
-                className="voice-chat-bubble"
-                whileHover={{ y: -4, scale: 1.02, rotate: msg.role === "emma" ? -0.6 : 0.6 }}
-                whileTap={{ scale: 0.98 }}
-                transition={springBouncy}
-              >
+              <div className="voice-chat-bubble">
                 <span className="voice-chat-bubble-label">
                   {msg.role === "user" ? "You" : "Emma"}
                 </span>
@@ -339,7 +377,7 @@ export function TextPipelineSession() {
                   {msg.text ||
                     (busy && msg.role === "emma" ? <TypingIndicator /> : "")}
                 </p>
-              </motion.div>
+              </div>
             </motion.div>
           ))}
         </AnimatePresence>
@@ -359,17 +397,17 @@ export function TextPipelineSession() {
           id={`${formId}-input`}
           className="voice-chat-input"
           rows={2}
-          placeholder="Type to Emma…"
+          placeholder={booting ? "Starting session…" : "Type to Emma…"}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          disabled={busy}
+          disabled={busy || booting}
         />
         <motion.button
           type="submit"
           className="btn btn-primary"
-          disabled={busy || !draft.trim()}
+          disabled={busy || booting || !draft.trim()}
           whileHover={busy ? undefined : { y: -4, scale: 1.05 }}
-          whileTap={busy ? undefined : { scale: 0.9, y: 2 }}
+          whileTap={busy ? undefined : { scale: 0.9 }}
           transition={springBouncy}
         >
           {busy ? "Streaming…" : "Send"}

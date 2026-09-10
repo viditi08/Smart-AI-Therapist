@@ -11,7 +11,7 @@ type Props = {
 
 export default async function LoginPage({ searchParams }: Props) {
   const sp = await searchParams;
-  let redirectTo = "/account";
+  let redirectTo = "/session/voice";
   if (
     typeof sp.callbackUrl === "string" &&
     sp.callbackUrl.startsWith("/") &&
@@ -22,13 +22,15 @@ export default async function LoginPage({ searchParams }: Props) {
 
   const oauthReady = isGoogleOAuthConfigured();
   const dbReady = isDatabaseUrlConfigured();
-  const canSignIn = oauthReady;
   const signInError = signInErrorMessage(
     typeof sp.error === "string" ? sp.error : undefined,
   );
-  const showGoogleHint = !oauthReady && !signInError;
-  const showDbHint = !dbReady && !signInError;
-  const basicError = sp.error === "InvalidCredentials" ? "Email or password is incorrect." : sp.error === "DatabaseRequired" ? "Email login needs PostgreSQL. Configure DATABASE_URL first." : null;
+  const basicError =
+    sp.error === "InvalidCredentials"
+      ? "Email or password is incorrect."
+      : sp.error === "DatabaseRequired"
+        ? "Email login needs PostgreSQL. Configure DATABASE_URL first."
+        : null;
 
   return (
     <div className="auth-shell">
@@ -37,16 +39,44 @@ export default async function LoginPage({ searchParams }: Props) {
           ← Back to Emma
         </Link>
         <h1 className="auth-title">Log in</h1>
-        <p className="auth-lead">Log in with email and password or your Google account.</p>
-        {basicError && <p className="auth-alert auth-alert-error" role="alert">{basicError}</p>}
-        {sp.created && <p className="auth-alert auth-alert-warn" role="status">Account created. You can log in now.</p>}
+        <p className="auth-lead">
+          Log in so your voice sessions save to your account.
+        </p>
+        {basicError ? (
+          <p className="auth-alert auth-alert-error" role="alert">
+            {basicError}
+          </p>
+        ) : null}
+        {sp.created ? (
+          <p className="auth-alert auth-alert-warn" role="status">
+            Account created. You can log in now.
+          </p>
+        ) : null}
         <form action={loginWithCredentials} className="basic-auth-form">
-          <label>Email<input name="email" type="email" autoComplete="email" required /></label>
-          <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
+          <label>
+            Email
+            <input name="email" type="email" autoComplete="email" required />
+          </label>
+          <label>
+            Password
+            <input
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </label>
           <input type="hidden" name="redirectTo" value={redirectTo} />
-          <button type="submit" className="btn btn-primary btn-lg">Log in with email</button>
+          <button type="submit" className="btn btn-primary btn-lg">
+            Log in with email
+          </button>
         </form>
-        <p className="auth-register-link">New here? <Link href={`/register?redirectTo=${encodeURIComponent(redirectTo)}`}>Create an account</Link></p>
+        <p className="auth-register-link">
+          New here?{" "}
+          <Link href={`/register?redirectTo=${encodeURIComponent(redirectTo)}`}>
+            Create an account
+          </Link>
+        </p>
 
         {signInError ? (
           <p className="auth-alert auth-alert-error" role="alert">
@@ -54,65 +84,41 @@ export default async function LoginPage({ searchParams }: Props) {
           </p>
         ) : null}
 
-        {showGoogleHint ? (
+        {!oauthReady && !signInError ? (
           <div className="auth-alert auth-alert-warn" role="status">
             <p>
-              Google sign-in is not configured on this server yet. Add{" "}
-              <code className="env-code">AUTH_GOOGLE_ID</code> and{" "}
-              <code className="env-code">AUTH_GOOGLE_SECRET</code> from{" "}
-              <a
-                href="https://console.cloud.google.com/apis/credentials"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Google Cloud Console
-              </a>{" "}
-              (OAuth client ID, type Web application) plus{" "}
-              <code className="env-code">AUTH_SECRET</code> in{" "}
-              <code className="env-code">.env.local</code> (not only in{" "}
-              <code className="env-code">.env.example</code>). See{" "}
-              <code className="env-code">.env.example</code> for the full list.
-            </p>
-            <p className="auth-alert-sub">
-              Until then, <strong>Continue with Google</strong> stays disabled — you will not
-              see Google&apos;s sign-in page. After saving <code className="env-code">.env.local</code>,{" "}
-              <strong>restart the dev server</strong> (stop <code className="env-code">npm run dev</code> and
-              start it again) so Next.js picks up the new variables.
+              Add <code className="env-code">AUTH_GOOGLE_ID</code> and{" "}
+              <code className="env-code">AUTH_GOOGLE_SECRET</code> to{" "}
+              <code className="env-code">.env.local</code> for Google sign-in.
             </p>
           </div>
         ) : null}
 
-        {showDbHint ? (
+        {!dbReady && !signInError ? (
           <div className="auth-alert auth-alert-warn" role="status">
             <p>
-              <strong>DATABASE_URL</strong> is not set. You can still sign in with Google;
-              your session will work, but <strong>saving chats to your account</strong> needs
-              PostgreSQL. Add <code className="env-code">DATABASE_URL</code> to{" "}
-              <code className="env-code">.env.local</code> (see{" "}
-              <code className="env-code">.env.example</code>), run{" "}
-              <code className="env-code">docker compose up -d</code> and{" "}
-              <code className="env-code">npx prisma migrate deploy</code>, then restart{" "}
-              <code className="env-code">npm run dev</code>.
+              <strong>DATABASE_URL</strong> is not set — saved sessions need Postgres.
             </p>
           </div>
         ) : null}
 
+        <div className="auth-divider" aria-hidden="true">
+          <span>or</span>
+        </div>
         <form action={loginWithGoogle}>
           <input type="hidden" name="redirectTo" value={redirectTo} />
           <button
             type="submit"
             className="btn btn-google btn-lg"
-            disabled={!canSignIn}
-            aria-disabled={!canSignIn}
+            disabled={!oauthReady}
           >
             <GoogleGlyph />
             Continue with Google
           </button>
         </form>
-        <div className="auth-divider" aria-hidden="true"><span>or</span></div>
         <p className="auth-foot">
-          By continuing you agree to our approach to privacy and consent around
-          AI-assisted support.
+          Emma is not emergency care. If you are in crisis, contact local emergency
+          services or a licensed clinician.
         </p>
       </div>
     </div>

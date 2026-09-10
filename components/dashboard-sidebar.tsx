@@ -40,7 +40,7 @@ export function DashboardSidebar({ user }: Props) {
           Dashboard
         </Link>
         <Link
-          href="/session"
+          href="/session/voice"
           className="dashboard-nav-link"
         >
           Voice session

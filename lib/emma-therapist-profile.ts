@@ -64,7 +64,7 @@ const personaLines: Record<EmmaVoicePersona, string> = {
     "Use an encouraging, structured tone—clear, kind, and action-oriented without being pushy.",
 };
 
-/** Builds the Gemini Live `systemInstruction` text from the therapist profile. */
+/** Builds the assistant system prompt text from the therapist profile. */
 export function buildTherapistLiveSystemInstruction(
   profile: EmmaTherapistAssistProfile = DEFAULT_EMMA_THERAPIST_PROFILE,
 ): string {

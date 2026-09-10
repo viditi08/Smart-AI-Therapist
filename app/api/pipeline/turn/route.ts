@@ -7,7 +7,8 @@ import {
   getEmmaTextSystemInstruction,
   maybeRollSummary,
 } from "@/lib/emma-text-pipeline";
-import { streamGeminiText } from "@/lib/gemini-text-stream";
+import { streamAssistantText } from "@/lib/llm-stream";
+import { parseOnboarding } from "@/lib/onboarding";
 import {
   allowPipelineAnon,
   loadPipelineSession,
@@ -16,6 +17,7 @@ import {
   savePipelineSession,
 } from "@/lib/pipeline-session-store";
 import { encodeSse, sseResponse } from "@/lib/pipeline-sse";
+import { createStreamingSentenceDetector } from "@/lib/sentence-boundary";
 import type { TurnMetrics } from "@/lib/pipeline-types";
 
 export const runtime = "nodejs";
@@ -42,6 +44,8 @@ export async function POST(req: Request) {
   const o = body as Record<string, unknown>;
   const sessionId = typeof o.sessionId === "string" ? o.sessionId.trim() : "";
   const message = typeof o.message === "string" ? o.message.trim() : "";
+  const mode = o.mode === "voice" ? "voice" : "text";
+  const onboarding = parseOnboarding(o.onboarding);
 
   if (!sessionId) {
     return Response.json({ error: "sessionId required" }, { status: 400 });
@@ -89,13 +93,21 @@ export async function POST(req: Request) {
         let llmTtftMs: number | null = null;
         let llmTotalMs: number | null = null;
 
+        const sentences = createStreamingSentenceDetector({
+          onSentence: (text, { sentenceIndex }) => {
+            push({ event: "sentence", data: { text, index: sentenceIndex } });
+          },
+        });
+
         if (crisis.level === "imminent") {
           assistantText = CRISIS_ESCALATION_REPLY;
           for (const word of assistantText.split(/(\s+)/)) {
             if (!word) continue;
             push({ event: "token", data: { text: word } });
+            sentences.push(word);
             await new Promise((r) => setTimeout(r, 8));
           }
+          sentences.flush();
         } else {
           const llmStarted = performance.now();
           const crisisNote =
@@ -103,11 +115,12 @@ export async function POST(req: Request) {
               ? "The user's message may indicate elevated distress. Prioritize safety, validation, and gentle encouragement to reach human crisis support if needed. Do not minimize."
               : undefined;
 
-          const gen = streamGeminiText({
-            systemInstruction: getEmmaTextSystemInstruction(),
+          const gen = streamAssistantText({
+            systemInstruction: getEmmaTextSystemInstruction(mode, onboarding),
             messages: state.messages,
             contextPrefix: buildContextPrefix(state.summary),
             crisisNote,
+            maxTokens: mode === "voice" ? 120 : 400,
           });
 
           for await (const chunk of gen) {
@@ -116,7 +129,9 @@ export async function POST(req: Request) {
             }
             assistantText += chunk.text;
             push({ event: "token", data: { text: chunk.text } });
+            sentences.push(chunk.text);
           }
+          sentences.flush();
           llmTotalMs = Math.round(performance.now() - llmStarted);
         }
 

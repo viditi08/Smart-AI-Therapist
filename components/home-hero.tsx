@@ -47,8 +47,8 @@ export function HomeHero() {
         <Reveal mode="load" delay={0.28}>
           <div className="hero-cta">
             <MotionButtonWrap>
-              <Link className="btn btn-primary btn-lg" href="/session">
-                Start a voice session
+              <Link className="btn btn-primary btn-lg" href="/session/voice">
+                Start voice-to-voice
               </Link>
             </MotionButtonWrap>
             <MotionButtonWrap>

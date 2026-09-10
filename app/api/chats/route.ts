@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { isDatabaseUrlConfigured } from "@/lib/database-env";
 import { prisma } from "@/lib/prisma";
 import { deriveConversationTitle } from "@/lib/session-history-storage";
@@ -14,7 +14,7 @@ function truncateTitle(value: string): string {
 }
 
 export async function GET() {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -41,7 +41,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
+  const session = await getSession();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }

@@ -1,16 +1,16 @@
 import Link from "next/link";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { GoogleGlyph } from "@/components/google-glyph";
 import { TextPipelineSession } from "@/components/text-pipeline-session";
 
 export const metadata = {
-  title: "Emma · Text pipeline (Phase 1)",
+  title: "Emma · Text pipeline",
   description:
-    "Production voice engineering foundation — streaming LLM, crisis detection, rolling summaries, turn metrics.",
+    "Same therapist cascade as voice — streaming LLM, crisis detection, rolling summaries, turn metrics.",
 };
 
 export default async function PipelineSessionPage() {
-  const session = await auth();
+  const session = await getSession();
 
   return (
     <div className="voice-chat-page">

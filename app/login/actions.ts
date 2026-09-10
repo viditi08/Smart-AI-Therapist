@@ -7,7 +7,7 @@ import { isDatabaseUrlConfigured } from "@/lib/database-env";
 
 function safeRedirectTo(value: unknown): string {
   if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) {
-    return "/account";
+    return "/session/voice";
   }
   return value;
 }

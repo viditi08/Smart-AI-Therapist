@@ -1,20 +1,21 @@
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { isDatabaseUrlConfigured } from "@/lib/database-env";
 import { prisma } from "@/lib/prisma";
 import type { PipelineMessage, PipelineSessionState } from "@/lib/pipeline-types";
+import { deriveConversationTitle } from "@/lib/session-history-storage";
+import type { SavedChatMessage } from "@/lib/session-history-storage";
 import type { Prisma } from "@prisma/client";
 
 export function allowPipelineAnon(): boolean {
   return (
     process.env.PIPELINE_ALLOW_ANON === "true" ||
-    process.env.GEMINI_FREE_TRIAL_NO_AUTH === "true" ||
     (process.env.NODE_ENV !== "production" &&
       process.env.PIPELINE_REQUIRE_AUTH !== "true")
   );
 }
 
 export async function resolvePipelineUserId(): Promise<string | null> {
-  const session = await auth();
+  const session = await getSession();
   return session?.user?.id ?? null;
 }
 
@@ -112,6 +113,43 @@ export async function savePipelineSession(
       turnCount: state.turnCount,
       summary: state.summary,
       messages: state.messages as unknown as Prisma.InputJsonValue,
+      ...(userId ? { userId } : {}),
+    },
+  });
+
+  if (userId) {
+    await persistPipelineToAccount(state, userId);
+  }
+}
+
+function toSavedChatMessages(messages: PipelineMessage[]): SavedChatMessage[] {
+  return messages.map((m, i) => ({
+    id: `${m.role}-${i}`,
+    role: m.role === "assistant" ? "emma" : "user",
+    text: m.content,
+  }));
+}
+
+/** Mirror the live pipeline transcript into ChatSession so it shows under the signed-in account. */
+async function persistPipelineToAccount(
+  state: PipelineSessionState,
+  userId: string,
+): Promise<void> {
+  const messages = toSavedChatMessages(state.messages);
+  if (messages.length === 0) return;
+
+  const title = deriveConversationTitle(messages);
+  await prisma.chatSession.upsert({
+    where: { id: state.id },
+    create: {
+      id: state.id,
+      userId,
+      title,
+      messages: messages as unknown as Prisma.InputJsonValue,
+    },
+    update: {
+      title,
+      messages: messages as unknown as Prisma.InputJsonValue,
     },
   });
 }

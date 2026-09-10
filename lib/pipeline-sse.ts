@@ -6,6 +6,7 @@ export type PipelineSseEvent =
   | { event: "session"; data: { sessionId: string; turnNumber: number } }
   | { event: "crisis"; data: { level: string; matched: string[] } }
   | { event: "token"; data: { text: string } }
+  | { event: "sentence"; data: { text: string; index: number } }
   | { event: "summary"; data: { summary: string; turnNumber: number } }
   | { event: "metrics"; data: TurnMetrics }
   | { event: "error"; data: { message: string } }

@@ -8,6 +8,8 @@ dist
 .env.neon
 prisma/*.db
 prisma/*.db-journal
+.ref-mellow
+tsconfig.tsbuildinfo
 voice-backend/.env
 voice-backend/.venv/
 __pycache__/

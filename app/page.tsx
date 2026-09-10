@@ -44,7 +44,8 @@ export default function HomePage() {
           <nav className="nav" aria-label="Primary">
             <a href="#why">Why Emma</a>
             <a href="#features">Features</a>
-            <Link href="/session">Voice</Link>
+            <Link href="/session/voice">Voice</Link>
+            <Link href="/login">Log in</Link>
             <a href="#cta">Get Started</a>
           </nav>
           <div className="header-actions">
@@ -74,7 +75,7 @@ export default function HomePage() {
               a space to talk. Speak at your own pace.
             </p>
             <div className="hero-cta">
-              <Link className="btn btn-primary btn-lg" href="/session">
+              <Link className="btn btn-primary btn-lg" href="/session/voice">
                 Start a voice session
               </Link>
               <a className="btn btn-outline btn-lg" href="#why">
@@ -164,7 +165,7 @@ export default function HomePage() {
               Open a session, tap the mic, and talk it through — Emma meets you
               in real time, voice to voice.
             </p>
-            <Link className="btn btn-primary btn-lg" href="/session">
+            <Link className="btn btn-primary btn-lg" href="/session/voice">
               Try a voice session free
             </Link>
           </div>
