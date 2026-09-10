@@ -3,34 +3,36 @@ import { VoicePipelineSession } from "@/components/voice-pipeline-session";
 import { getSession } from "@/lib/session";
 
 export const metadata = {
-  title: "Emma · Voice session",
-  description: "Talk with Emma — speak, and she answers out loud.",
+  title: "Talk with Emma",
+  description: "A live voice session with Emma.",
 };
 
 export default async function VoiceSessionPage() {
   const session = await getSession();
+  const signedIn = Boolean(session?.user);
 
   return (
-    <div className="voice-chat-page">
-      <div className="voice-chat-page-toolbar">
-        <Link className="voice-chat-page-back" href="/">
-          ← Back
+    <div className="talk-room">
+      <header className="talk-room-bar">
+        <Link className="talk-room-brand" href="/">
+          <span className="talk-room-mark" aria-hidden />
+          Emma
         </Link>
-        {session?.user ? (
-          <Link className="voice-chat-page-dashboard" href="/account">
-            Your sessions
-          </Link>
-        ) : (
-          <Link className="voice-chat-page-dashboard" href="/login?callbackUrl=/session/voice">
-            Log in to save
-          </Link>
-        )}
-      </div>
-      <p className="voice-stage-save-hint">
-        {session?.user
-          ? `Signed in as ${session.user.email ?? session.user.name}. This conversation saves to your account.`
-          : "Log in to save this conversation to your account."}
-      </p>
+        <div className="talk-room-bar-end">
+          <span className={`talk-room-pill${signedIn ? " is-saved" : ""}`}>
+            {signedIn ? "Saving to your account" : "Guest · not saved"}
+          </span>
+          {signedIn ? (
+            <Link className="talk-room-link" href="/account">
+              Sessions
+            </Link>
+          ) : (
+            <Link className="talk-room-link" href="/login?callbackUrl=/session/voice">
+              Sign in
+            </Link>
+          )}
+        </div>
+      </header>
       <VoicePipelineSession />
     </div>
   );

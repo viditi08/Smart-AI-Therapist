@@ -585,19 +585,31 @@ export function VoicePipelineSession() {
 
   const status = !live
     ? turnCount > 0
-      ? "Paused — tap when you're ready to keep going"
-      : "Tap once. Then just talk — I'll keep the conversation going."
+      ? "Paused"
+      : "Ready when you are"
     : stage === "listening"
-      ? "I'm listening"
-      : stage === "stt" || stage === "thinking"
-        ? "With you…"
-        : stage === "speaking"
-          ? "Emma"
-          : "I'm here";
+      ? "Listening"
+      : stage === "stt"
+        ? "Hearing you"
+        : stage === "thinking"
+          ? "Thinking"
+          : stage === "speaking"
+            ? "Speaking"
+            : "With you";
+
+  const hint = !live
+    ? turnCount > 0
+      ? "Tap to pick up where you left off"
+      : "Tap the button. Then just talk — I'll wait for a pause."
+    : stage === "listening"
+      ? "Go ahead. Pause when you're done."
+      : stage === "speaking"
+        ? "I'm here with you."
+        : "Give me a moment…";
 
   return (
     <div
-      className="voice-stage"
+      className="talk-stage"
       data-stage={live ? stage : "idle"}
       data-live={live ? "true" : "false"}
     >
@@ -608,83 +620,110 @@ export function VoicePipelineSession() {
         />
       ) : null}
 
-      <div className="voice-stage-avatar">
-        <span className="voice-stage-ring" aria-hidden />
-        <span className="voice-stage-ring voice-stage-ring-2" aria-hidden />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/emma-avatar.png" alt="Emma" width={240} height={240} />
+      <div className="talk-ambient" aria-hidden>
+        <span className="talk-blob talk-blob-a" />
+        <span className="talk-blob talk-blob-b" />
+        <span className="talk-blob talk-blob-c" />
       </div>
 
-      <h1 className="voice-stage-name">You&rsquo;re in a session with Emma</h1>
-      <p className="voice-stage-status" aria-live="polite">
+      <div className="talk-presence">
+        <div className="talk-halo" aria-hidden>
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className="talk-avatar">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/emma-avatar.png" alt="" width={220} height={220} />
+        </div>
+        <div className="talk-waves" aria-hidden>
+          {Array.from({ length: 7 }, (_, i) => (
+            <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />
+          ))}
+        </div>
+      </div>
+
+      <p className="talk-kicker">In session</p>
+      <h1 className="talk-name">Emma</h1>
+      <p className="talk-status" aria-live="polite">
+        <span className="talk-status-dot" />
         {status}
       </p>
+      <p className="talk-hint">{hint}</p>
 
-      <div className="voice-stage-caption-slot">
-        <AnimatePresence>
-          {interim ? (
+      <div className="talk-quote">
+        <AnimatePresence mode="wait">
+          {error ? (
             <motion.p
-              className="voice-stage-caption"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              key="error"
+              className="talk-error"
+              role="alert"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
             >
+              {error}
+            </motion.p>
+          ) : interim ? (
+            <motion.p
+              key="you"
+              className="talk-line talk-line-you"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+            >
+              <span>You</span>
               {interim}
             </motion.p>
           ) : emmaLine ? (
             <motion.p
               key={emmaLine}
-              className="voice-stage-caption"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              className="talk-line talk-line-emma"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
             >
+              <span>Emma</span>
               {emmaLine}
             </motion.p>
-          ) : null}
-        </AnimatePresence>
-        <AnimatePresence mode="wait">
-          {error ? (
-            <motion.p
-              key="error"
-              className="voice-stage-error"
-              role="alert"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-            >
-              {error}
-            </motion.p>
-          ) : null}
+          ) : (
+            <p className="talk-line talk-line-empty">
+              A quiet space to say what&rsquo;s on your mind.
+            </p>
+          )}
         </AnimatePresence>
       </div>
 
       <motion.button
         type="button"
-        className={`voice-stage-mic${live ? " is-live" : ""}`}
+        className={`talk-cta${live ? " is-live" : ""}`}
         onClick={() => (live ? stopConversation() : void startConversation())}
-        whileTap={{ scale: 0.94 }}
+        whileTap={{ scale: 0.97 }}
         transition={springBouncy}
-        aria-label={live ? "Pause the conversation" : "Start talking with Emma"}
       >
-        {live ? <StopGlyph /> : <MicGlyph />}
+        <span className="talk-cta-icon" aria-hidden>
+          {live ? <StopGlyph /> : <MicGlyph />}
+        </span>
+        {live ? "Pause" : turnCount > 0 ? "Continue" : "Start talking"}
       </motion.button>
 
-      <div className="voice-stage-actions">
+      <div className="talk-foot">
         {turnCount > 0 ? (
           <button
             type="button"
-            className="voice-stage-link"
+            className="talk-end"
             onClick={() => void endSession()}
             disabled={ending}
           >
             {ending ? "Wrapping up…" : "End session"}
           </button>
-        ) : null}
+        ) : (
+          <p className="talk-privacy">Private · no judgment · not emergency care</p>
+        )}
       </div>
 
       {sessionSummary ? (
-        <p className="voice-stage-summary">{sessionSummary}</p>
+        <p className="talk-summary">{sessionSummary}</p>
       ) : null}
     </div>
   );
