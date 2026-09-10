@@ -20,7 +20,7 @@ Mic  ──►  Pipecat (Deepgram Flux → NVIDIA NIM → ElevenLabs)  ──►
 
 Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **not** run this Python process — run it locally or host it on Railway, Fly, or a VM, then set `NEXT_PUBLIC_PIPECAT_BACKEND_URL`.
 
-**Text (`/session/pipeline`)** still uses Next.js API routes (`/api/pipeline/stt`, `/turn`, `/tts`).
+**Text (`/session/pipeline`)** uses Next.js `/api/pipeline/turn` and `/api/pipeline/summarize`.
 
 ---
 
@@ -90,7 +90,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
    Put the same Deepgram, NVIDIA, and ElevenLabs keys in `voice-backend/.env`. Then:
 
    ```bash
-   node scripts/export-emma-prompt.cjs
+   npm run export:emma-prompt
    voice-backend/.venv/bin/python voice-backend/server.py
    ```
 
@@ -173,11 +173,11 @@ Voice will not work on Vercel alone. Host `voice-backend/` on Railway, Fly.io, o
 
 - `voice-backend/` — Pipecat FastAPI server (Deepgram → NVIDIA → ElevenLabs)
 - `app/` — routes (marketing `/`, `/session/voice`, `/session/pipeline`, `/login`, dashboard `/account`)
-- `app/api/pipeline/` — `turn` (SSE brain), `stt`, `tts`, `summarize`
+- `app/api/pipeline/` — text chat: `session`, `turn` (SSE), `summarize`
 - `auth.ts` / `auth.config.ts` — Auth.js + optional Prisma adapter
-- `components/` — UI (voice + text sessions, onboarding, crisis modal, dashboard shell, auth)
+- `components/session/` — Pipecat voice UI, text chat, onboarding
 - `prisma/` — schema + migrations
-- `lib/` — provider clients (`speech-to-text`, `llm-stream`, `text-to-speech`), sentence chunking, crisis detection, onboarding, Prisma/auth helpers
+- `lib/` — NVIDIA stream, crisis detection, Prisma/auth helpers
 
 ---
 

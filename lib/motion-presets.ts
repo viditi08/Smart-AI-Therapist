@@ -1,8 +1,7 @@
-/** Shared Framer Motion springs + variants — playful bounce. */
+/** Shared Framer Motion springs + variants. */
 
 export const easeCalm = [0.22, 1, 0.36, 1] as const;
 
-/** Default bouncy spring — visible overshoot, still friendly. */
 export const springPlayful = {
   type: "spring" as const,
   stiffness: 520,
@@ -10,47 +9,11 @@ export const springPlayful = {
   mass: 0.85,
 };
 
-/** Extra bounce for entrances + chat bubbles. */
 export const springBouncy = {
   type: "spring" as const,
   stiffness: 640,
   damping: 11,
   mass: 0.75,
-};
-
-/** Snappy press / hover feedback. */
-export const springSnappy = {
-  type: "spring" as const,
-  stiffness: 700,
-  damping: 16,
-  mass: 0.6,
-};
-
-/** Gentle float loops. */
-export const springFloat = {
-  type: "spring" as const,
-  stiffness: 120,
-  damping: 10,
-  mass: 1.2,
-};
-
-export const fadeUp = {
-  hidden: { opacity: 0, y: 32, scale: 0.94 },
-  visible: (delay = 0) => ({
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: { ...springBouncy, delay },
-  }),
-};
-
-export const fadeIn = {
-  hidden: { opacity: 0, scale: 0.98 },
-  visible: (delay = 0) => ({
-    opacity: 1,
-    scale: 1,
-    transition: { ...springPlayful, delay },
-  }),
 };
 
 export const bubbleIn = {

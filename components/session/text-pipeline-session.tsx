@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CrisisModal } from "@/components/crisis-modal";
 import { TypingIndicator } from "@/components/motion/reveal";
-import { SessionOnboarding } from "@/components/session-onboarding";
+import { SessionOnboarding } from "@/components/session/onboarding";
 import {
   loadOnboarding,
   saveOnboarding,

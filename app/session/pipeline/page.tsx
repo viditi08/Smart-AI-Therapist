@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { GoogleGlyph } from "@/components/google-glyph";
-import { TextPipelineSession } from "@/components/text-pipeline-session";
+import { TextPipelineSession } from "@/components/session/text-pipeline-session";
 
 export const metadata = {
   title: "Emma · Text pipeline",

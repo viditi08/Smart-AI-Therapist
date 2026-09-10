@@ -70,8 +70,7 @@ credentials, and real interruptions require a browser conversation with valid ke
 
 The server binds to `127.0.0.1:7860`, allows one connection, and accepts signaling
 only from configured local frontend origins. Sessions have a 30-minute maximum and
-a 120-second idle timeout. The local mode is disabled in production Next.js builds.
-This backend is not an authenticated public service. Hosting it publicly requires
+a 120-second idle timeout. This backend is not an authenticated public service. Hosting it publicly requires
 authentication tied to the existing user session, usage limits, HTTPS, and a
 transport deployment suited to the target network. Vercel's existing Next.js
 deployment does not run this Python process.

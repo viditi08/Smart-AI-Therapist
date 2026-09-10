@@ -213,41 +213,6 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return raw as T;
 }
 
-export async function transcribePipelineAudio(input: {
-  mimeType: string;
-  audio: string;
-}): Promise<{ transcript: string; sttMs: number | null }> {
-  const raw = await postJson<{ transcript?: string; sttMs?: number }>(
-    "/api/pipeline/stt",
-    input,
-  );
-  return {
-    transcript: (raw.transcript ?? "").trim(),
-    sttMs: typeof raw.sttMs === "number" ? raw.sttMs : null,
-  };
-}
-
-export async function synthesizePipelineSpeech(text: string): Promise<{
-  mimeType: string;
-  audio: string;
-  ttsMs: number | null;
-} | null> {
-  try {
-    const raw = await postJson<{ mimeType?: string; audio?: string; ttsMs?: number }>(
-      "/api/pipeline/tts",
-      { text },
-    );
-    if (!raw.audio || !raw.mimeType) return null;
-    return {
-      mimeType: raw.mimeType,
-      audio: raw.audio,
-      ttsMs: typeof raw.ttsMs === "number" ? raw.ttsMs : null,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export async function summarizePipelineSession(
   transcript: { role: "user" | "assistant" | "emma"; content?: string; text?: string }[],
 ): Promise<string> {
@@ -255,11 +220,4 @@ export async function summarizePipelineSession(
     transcript,
   });
   return raw.summary?.trim() || "A summary couldn't be generated for this session.";
-}
-
-export function audioBase64ToBlob(base64: string, mimeType: string): Blob {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType });
 }

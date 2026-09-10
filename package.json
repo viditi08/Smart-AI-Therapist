@@ -12,7 +12,8 @@
     "db:migrate:neon": "dotenv -e .env.neon -- prisma migrate deploy",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "export:emma-prompt": "node scripts/export-emma-prompt.cjs"
   },
   "engines": {
     "node": ">=18.18"

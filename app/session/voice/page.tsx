@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PipecatSession } from "@/components/pipecat-session";
+import { PipecatSession } from "@/components/session/pipecat-session";
 import { getSession } from "@/lib/session";
 
 export const metadata = {

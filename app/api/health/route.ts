@@ -7,17 +7,7 @@ export function GET() {
       process.env.LLM_API_KEY?.trim() ||
       process.env.OPENAI_API_KEY?.trim(),
   );
-  const hasStt = Boolean(process.env.DEEPGRAM_API_KEY?.trim());
-  const hasTts = Boolean(
-    process.env.ELEVENLABS_API_KEY?.trim() || process.env.ELEVEN_LABS_API_KEY?.trim(),
-  );
   const hasDb = isDatabaseUrlConfigured();
-
-  const missing = [
-    !hasLlm ? "NVIDIA_API_KEY" : null,
-    !hasStt ? "DEEPGRAM_API_KEY" : null,
-    !hasTts ? "ELEVENLABS_API_KEY" : null,
-  ].filter(Boolean);
 
   return NextResponse.json({
     ok: hasLlm,
@@ -26,14 +16,11 @@ export function GET() {
     time: new Date().toISOString(),
     checks: {
       llm: hasLlm,
-      stt: hasStt,
-      tts: hasTts,
       database: hasDb,
-      pipeline: hasLlm,
-      voicePipeline: hasLlm && hasStt && hasTts,
+      textPipeline: hasLlm,
     },
-    hint: missing.length
-      ? `Add ${missing.join(", ")} to .env.local and restart npm run dev`
-      : undefined,
+    hint: hasLlm
+      ? undefined
+      : "Add NVIDIA_API_KEY to .env.local and restart npm run dev. Voice keys live in voice-backend/.env.",
   });
 }
