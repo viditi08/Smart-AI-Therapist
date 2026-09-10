@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { VoicePipelineSession } from "@/components/voice-pipeline-session";
+import { PipecatSession } from "@/components/pipecat-session";
 import { getSession } from "@/lib/session";
 
 export const metadata = {
@@ -33,7 +33,7 @@ export default async function VoiceSessionPage() {
           )}
         </div>
       </header>
-      <VoicePipelineSession />
+      <PipecatSession />
     </div>
   );
 }

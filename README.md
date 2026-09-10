@@ -1,6 +1,6 @@
-# Emma — AI Therapist (landing + voice pipeline)
+# Emma — AI Therapist (landing + Pipecat voice)
 
-Conversational, therapy-style support with **Emma**: a cascading voice pipeline (**Deepgram** speech-to-text → **NVIDIA NIM** streaming LLM → **ElevenLabs** speech), **Google or email sign-in**, and **saved conversations** backed by **PostgreSQL** (Prisma).
+Conversational, therapy-style support with **Emma**: a **Pipecat** voice agent (**Deepgram** STT → **NVIDIA NIM** LLM → **ElevenLabs** TTS over WebRTC), plus a Next.js text pipeline, **Google or email sign-in**, and **saved conversations** in **PostgreSQL**.
 
 **Repository:** [github.com/viditi08/Smart-AI-Therapist](https://github.com/viditi08/Smart-AI-Therapist)  
 **Live site:** [https://smart-ai-therapist.vercel.app](https://smart-ai-therapist.vercel.app)
@@ -11,21 +11,16 @@ Emma is **not** a substitute for emergency services, diagnosis, or care from a l
 
 ## Pipeline
 
-Each turn runs the same cascade in both text and voice mode:
+**Voice (`/session/voice`)** is a Pipecat process (Python). The browser opens a WebRTC line to it:
 
 ```
-Mic  ──►  Deepgram STT  ──►  NVIDIA NIM (Llama 3.1 8B)  ──►  ElevenLabs TTS  ──►  Speaker
-          /api/pipeline/stt   /api/pipeline/turn (SSE)      /api/pipeline/tts
+Mic  ──►  Pipecat (Deepgram Flux → NVIDIA NIM → ElevenLabs)  ──►  Speaker
+          voice-backend on port 7860
 ```
 
-- **Streaming with sentence chunking** — `/api/pipeline/turn` streams tokens over SSE and emits a `sentence` event at each boundary, so the client can start synthesizing speech before the full reply is done.
-- **Crisis detection** — every user message is screened; imminent-risk messages bypass the LLM, return a fixed escalation reply, and open a modal with 988, Crisis Text Line, and 911.
-- **Onboarding personalization** — a short intake (name, focus, tone, goal) is folded into the system prompt.
-- **Rolling summaries** — long sessions are compacted so context stays bounded.
-- **Post-session summary** — `/api/pipeline/summarize` writes 2–3 warm, plain-language sentences.
-- **Turn metrics** — STT time, LLM time-to-first-token, and end-to-end latency are surfaced in the UI.
+Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **not** run this Python process — run it locally or host it on Railway, Fly, or a VM, then set `NEXT_PUBLIC_PIPECAT_BACKEND_URL`.
 
-Provider defaults are overridable: `LLM_MODEL`, `LLM_BASE_URL`, `DEEPGRAM_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL`.
+**Text (`/session/pipeline`)** still uses Next.js API routes (`/api/pipeline/stt`, `/turn`, `/tts`).
 
 ---
 
@@ -35,14 +30,16 @@ Provider defaults are overridable: `LLM_MODEL`, `LLM_BASE_URL`, `DEEPGRAM_MODEL`
 - [React](https://react.dev/) 19
 - [Auth.js / NextAuth](https://authjs.dev/) v5 — Google OAuth, JWT sessions, optional [Prisma](https://www.prisma.io/) adapter when `DATABASE_URL` is set
 - [Prisma](https://www.prisma.io/) + PostgreSQL — users (via adapter) + `ChatSession` transcripts
-- [Deepgram](https://deepgram.com/) `nova-3` — speech-to-text
-- [NVIDIA NIM](https://build.nvidia.com/) — streaming LLM (OpenAI-compatible API)
+- [Pipecat](https://www.pipecat.ai/) — live voice (Python `voice-backend`)
+- [Deepgram](https://deepgram.com/) — speech-to-text
+- [NVIDIA NIM](https://build.nvidia.com/) — streaming LLM
 - [ElevenLabs](https://elevenlabs.io/) `eleven_flash_v2_5` — text-to-speech
 
 ---
 
 ## Requirements
 
+- **Python 3.11** — for the Pipecat voice backend
 - **Node.js** ≥ 18.18  
 - **PostgreSQL** — hosted (e.g. [Neon](https://neon.tech)) for production; locally optional via [Docker](https://www.docker.com/) (`docker-compose.yml` maps host port **5433**)
 - **Google Cloud** — OAuth 2.0 **Web** client (Client ID + secret)
@@ -82,13 +79,30 @@ Provider defaults are overridable: `LLM_MODEL`, `LLM_BASE_URL`, `DEEPGRAM_MODEL`
      # or: npm run db:migrate
      ```
 
-4. Run the app:
+4. **Pipecat voice backend** (required for `/session/voice`):
+
+   ```bash
+   python3.11 -m venv voice-backend/.venv
+   voice-backend/.venv/bin/pip install -r voice-backend/requirements.txt
+   cp voice-backend/.env.example voice-backend/.env
+   ```
+
+   Put the same Deepgram, NVIDIA, and ElevenLabs keys in `voice-backend/.env`. Then:
+
+   ```bash
+   node scripts/export-emma-prompt.cjs
+   voice-backend/.venv/bin/python voice-backend/server.py
+   ```
+
+   Details: [voice-backend/README.md](./voice-backend/README.md).
+
+5. Run the Next.js app in a second terminal:
 
    ```bash
    npm run dev
    ```
 
-   Open [http://localhost:3000](http://localhost:3000).
+   Open [http://localhost:3000/session/voice](http://localhost:3000/session/voice).
 
 ### Useful scripts
 
@@ -141,6 +155,9 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
    | `ELEVENLABS_VOICE_ID` | Optional; defaults to `21m00Tcm4TlvDq8ikWAM` |
    | `AUTH_URL` | `https://smart-ai-therapist.vercel.app` (no trailing slash) |
    | `AUTH_TRUST_HOST` | `true` |
+   | `NEXT_PUBLIC_PIPECAT_BACKEND_URL` | Public HTTPS origin of the Python Pipecat server (not Vercel) |
+
+Voice will not work on Vercel alone. Host `voice-backend/` on Railway, Fly.io, or a VM, set `FRONTEND_ORIGINS` there to your Vercel URL, then set `NEXT_PUBLIC_PIPECAT_BACKEND_URL` to that Python URL.
 
 3. Run **Neon migrations** before or on first deploy (`npm run db:migrate:neon` locally against Neon, or rely on `build:production` if `DATABASE_URL` is set in Vercel).
 
@@ -154,6 +171,7 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
 
 ## Project layout (high level)
 
+- `voice-backend/` — Pipecat FastAPI server (Deepgram → NVIDIA → ElevenLabs)
 - `app/` — routes (marketing `/`, `/session/voice`, `/session/pipeline`, `/login`, dashboard `/account`)
 - `app/api/pipeline/` — `turn` (SSE brain), `stt`, `tts`, `summarize`
 - `auth.ts` / `auth.config.ts` — Auth.js + optional Prisma adapter

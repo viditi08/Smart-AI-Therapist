@@ -1,0 +1,4 @@
+pipecat-ai[webrtc,deepgram,nvidia,elevenlabs,silero]==1.8.1
+fastapi==0.141.1
+uvicorn==0.52.4
+python-dotenv==1.2.3
