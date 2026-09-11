@@ -81,9 +81,9 @@ export function PipecatSession() {
       if (!current()) return;
       stop();
       setError(
-        "Connection timed out. Start the Pipecat backend and check your provider keys.",
+        "Connection timed out. Render cannot carry WebRTC audio (UDP). Use local Pipecat for demos, or a host that allows UDP / a TURN server.",
       );
-    }, 30000);
+    }, 45000);
     try {
       const response = await fetch(`${backend}/health`, {
         signal: controller.signal,
@@ -105,7 +105,10 @@ export function PipecatSession() {
       if (!current()) return;
       const client = new PipecatClient({
         transport: new SmallWebRTCTransport({
-          iceServers: [],
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+          ],
           waitForICEGathering: true,
         }),
         enableMic: true,

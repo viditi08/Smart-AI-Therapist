@@ -33,6 +33,7 @@ from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequestHandler,
     SmallWebRTCPatchRequest,
 )
+from pipecat.transports.smallwebrtc.connection import IceServer
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
@@ -49,7 +50,18 @@ ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
 VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
-handler = SmallWebRTCRequestHandler(connection_mode=ConnectionMode.SINGLE)
+ICE_SERVERS = [
+    IceServer(urls=url.strip())
+    for url in os.getenv(
+        "ICE_SERVERS",
+        "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302",
+    ).split(",")
+    if url.strip()
+]
+handler = SmallWebRTCRequestHandler(
+    ice_servers=ICE_SERVERS,
+    connection_mode=ConnectionMode.SINGLE,
+)
 
 
 def origin_allowed(origin: str | None) -> bool:
@@ -69,7 +81,10 @@ async def drop_existing_session():
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
     tasks.clear()
-    await handler.close()
+    try:
+        await handler.close()
+    except Exception:
+        logger.warning("Previous WebRTC session did not close cleanly.")
 
 
 def missing_settings():
