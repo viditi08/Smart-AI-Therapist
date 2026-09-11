@@ -11,6 +11,20 @@ import {
 
 const backend =
   process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL ?? "http://127.0.0.1:7860";
+const iceServers = (() => {
+  const fallback = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+  const raw = process.env.NEXT_PUBLIC_PIPECAT_ICE_SERVERS;
+  if (!raw) return fallback;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+})();
 
 type Stage = "idle" | "connecting" | "listening" | "speaking";
 
@@ -81,7 +95,7 @@ export function PipecatSession() {
       if (!current()) return;
       stop();
       setError(
-        "Connection timed out. Render cannot carry WebRTC audio (UDP). Use local Pipecat for demos, or a host that allows UDP / a TURN server.",
+        "Connection timed out. Check the hosted backend URL, CORS settings, and TURN server configuration, then try again.",
       );
     }, 45000);
     try {
@@ -105,10 +119,7 @@ export function PipecatSession() {
       if (!current()) return;
       const client = new PipecatClient({
         transport: new SmallWebRTCTransport({
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-          ],
+          iceServers,
           waitForICEGathering: true,
         }),
         enableMic: true,
