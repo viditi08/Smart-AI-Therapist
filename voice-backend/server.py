@@ -139,7 +139,7 @@ async def local_browser_only(request: Request, call_next):
     return await call_next(request)
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     missing = missing_settings()
     return {
@@ -150,7 +150,7 @@ async def root():
     }
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     missing = missing_settings()
     return {"ready": not missing, "missing": missing}
