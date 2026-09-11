@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -46,7 +48,14 @@ REQUIRED = (
 ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
+VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 handler = SmallWebRTCRequestHandler(connection_mode=ConnectionMode.SINGLE)
+
+
+def origin_allowed(origin: str | None) -> bool:
+    if not origin:
+        return True
+    return origin in ORIGINS or bool(VERCEL_ORIGIN.match(origin))
 tasks: set[asyncio.Task] = set()
 offer_lock = asyncio.Lock()
 
@@ -125,17 +134,26 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=ORIGINS,
-                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ORIGINS,
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*vercel\.app",
+    allow_methods=["GET", "POST", "PATCH", "HEAD", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 
 @app.middleware("http")
-async def local_browser_only(request: Request, call_next):
+async def known_browser_only(request: Request, call_next):
     # CORS alone does not reject cross-origin POSTs. Reject before allocating a bot.
     origin = request.headers.get("origin")
-    if request.method in {"POST", "PATCH"} and origin not in ORIGINS:
-        from fastapi.responses import JSONResponse
-        return JSONResponse({"detail": "Local frontend origin required."}, status_code=403)
+    if request.method in {"POST", "PATCH"} and not (
+        origin and origin_allowed(origin)
+    ):
+        return JSONResponse(
+            {"detail": "Set FRONTEND_ORIGINS to your Vercel HTTPS origin."},
+            status_code=403,
+        )
     return await call_next(request)
 
 
