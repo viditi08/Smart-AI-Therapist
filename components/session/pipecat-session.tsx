@@ -69,6 +69,7 @@ export function PipecatSession() {
   async function start() {
     if (clientRef.current) return;
     release();
+    await new Promise((resolve) => setTimeout(resolve, 400));
     const run = generation.current;
     const current = () => generation.current === run;
     setError(null);
@@ -170,7 +171,9 @@ export function PipecatSession() {
             ? "This live site is still pointing at localhost:7860. On Vercel, set NEXT_PUBLIC_PIPECAT_BACKEND_URL to your hosted Pipecat HTTPS URL, then Redeploy."
             : `Cannot reach the voice server at ${backend}. Start that host, allow this site in FRONTEND_ORIGINS, and check /health.`
           : cause instanceof Error
-            ? cause.message
+            ? /existing connection/i.test(cause.message)
+              ? "A session is already open. Tap Pause, wait a second, then Start talking again."
+              : cause.message
             : "Could not start voice session.",
       );
     }

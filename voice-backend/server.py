@@ -56,8 +56,20 @@ def origin_allowed(origin: str | None) -> bool:
     if not origin:
         return True
     return origin in ORIGINS or bool(VERCEL_ORIGIN.match(origin))
+
+
 tasks: set[asyncio.Task] = set()
 offer_lock = asyncio.Lock()
+
+
+async def drop_existing_session():
+    pending = list(tasks)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    tasks.clear()
+    await handler.close()
 
 
 def missing_settings():
@@ -193,6 +205,10 @@ async def offer(body: Offer):
         task.add_done_callback(tasks.discard)
 
     async with offer_lock:
+        # A new browser offer has no pc_id. Drop a leftover session so Start talking
+        # works after Pause, refresh, or a dropped WebRTC peer.
+        if not body.pc_id:
+            await drop_existing_session()
         return await handler.handle_web_request(
             SmallWebRTCRequest(**body.model_dump()), connected,
         )
