@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import re
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -10,7 +9,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -33,7 +31,6 @@ from pipecat.transports.smallwebrtc.request_handler import (
     SmallWebRTCRequestHandler,
     SmallWebRTCPatchRequest,
 )
-from pipecat.transports.smallwebrtc.connection import IceServer
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
@@ -49,42 +46,13 @@ REQUIRED = (
 ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
-VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
-ICE_SERVERS = [
-    IceServer(urls=url.strip())
-    for url in os.getenv(
-        "ICE_SERVERS",
-        "stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302",
-    ).split(",")
-    if url.strip()
-]
+ICE_SERVERS = [value.strip() for value in os.getenv("ICE_SERVERS", "").split(",") if value.strip()]
 handler = SmallWebRTCRequestHandler(
-    ice_servers=ICE_SERVERS,
+    ice_servers=ICE_SERVERS or None,
     connection_mode=ConnectionMode.SINGLE,
 )
-
-
-def origin_allowed(origin: str | None) -> bool:
-    if not origin:
-        return True
-    return origin in ORIGINS or bool(VERCEL_ORIGIN.match(origin))
-
-
 tasks: set[asyncio.Task] = set()
 offer_lock = asyncio.Lock()
-
-
-async def drop_existing_session():
-    pending = list(tasks)
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-    tasks.clear()
-    try:
-        await handler.close()
-    except Exception:
-        logger.warning("Previous WebRTC session did not close cleanly.")
 
 
 def missing_settings():
@@ -161,41 +129,21 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ORIGINS,
-    allow_origin_regex=r"https://([a-z0-9-]+\.)*vercel\.app",
-    allow_methods=["GET", "POST", "PATCH", "HEAD", "OPTIONS"],
-    allow_headers=["Content-Type"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=ORIGINS,
+                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type"])
 
 
 @app.middleware("http")
-async def known_browser_only(request: Request, call_next):
+async def local_browser_only(request: Request, call_next):
     # CORS alone does not reject cross-origin POSTs. Reject before allocating a bot.
     origin = request.headers.get("origin")
-    if request.method in {"POST", "PATCH"} and not (
-        origin and origin_allowed(origin)
-    ):
-        return JSONResponse(
-            {"detail": "Set FRONTEND_ORIGINS to your Vercel HTTPS origin."},
-            status_code=403,
-        )
+    if request.method in {"POST", "PATCH"} and origin not in ORIGINS:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Local frontend origin required."}, status_code=403)
     return await call_next(request)
 
 
-@app.api_route("/", methods=["GET", "HEAD"])
-async def root():
-    missing = missing_settings()
-    return {
-        "service": "emma-voice",
-        "ready": not missing,
-        "health": "/health",
-        "offer": "/api/offer",
-    }
-
-
-@app.api_route("/health", methods=["GET", "HEAD"])
+@app.get("/health")
 async def health():
     missing = missing_settings()
     return {"ready": not missing, "missing": missing}
@@ -220,10 +168,6 @@ async def offer(body: Offer):
         task.add_done_callback(tasks.discard)
 
     async with offer_lock:
-        # A new browser offer has no pc_id. Drop a leftover session so Start talking
-        # works after Pause, refresh, or a dropped WebRTC peer.
-        if not body.pc_id:
-            await drop_existing_session()
         return await handler.handle_web_request(
             SmallWebRTCRequest(**body.model_dump()), connected,
         )
