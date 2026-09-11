@@ -139,6 +139,17 @@ async def local_browser_only(request: Request, call_next):
     return await call_next(request)
 
 
+@app.get("/")
+async def root():
+    missing = missing_settings()
+    return {
+        "service": "emma-voice",
+        "ready": not missing,
+        "health": "/health",
+        "offer": "/api/offer",
+    }
+
+
 @app.get("/health")
 async def health():
     missing = missing_settings()

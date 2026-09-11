@@ -163,9 +163,12 @@ export function PipecatSession() {
     } catch (cause) {
       if (!current()) return;
       stop();
+      const localBackend = backend.includes("127.0.0.1") || backend.includes("localhost");
       setError(
         cause instanceof TypeError
-          ? "Start the Pipecat backend on port 7860, then try again."
+          ? localBackend
+            ? "This live site is still pointing at localhost:7860. On Vercel, set NEXT_PUBLIC_PIPECAT_BACKEND_URL to your hosted Pipecat HTTPS URL, then Redeploy."
+            : `Cannot reach the voice server at ${backend}. Start that host, allow this site in FRONTEND_ORIGINS, and check /health.`
           : cause instanceof Error
             ? cause.message
             : "Could not start voice session.",
