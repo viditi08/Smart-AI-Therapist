@@ -149,6 +149,15 @@ async def health():
     return {"ready": not missing, "missing": missing}
 
 
+@app.get("/")
+async def root():
+    return {
+        "service": "Emma Pipecat voice backend",
+        "status": "ok",
+        "health": "/health",
+    }
+
+
 class Offer(BaseModel):
     sdp: str = Field(min_length=1, max_length=100_000)
     type: str = Field(pattern="^offer$")
