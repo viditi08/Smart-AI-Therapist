@@ -9,8 +9,17 @@ import {
   type SavedChatMessage,
 } from "@/lib/session-history-storage";
 
-const backend =
-  process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL ?? "http://127.0.0.1:7860";
+const backend = (() => {
+  if (process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL.replace(/\/$/, "");
+  }
+  // Keep local development pointed at the local server, but make a hosted
+  // build usable even if Vercel's environment variable was omitted.
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    return "https://smart-ai-therapist.onrender.com";
+  }
+  return "http://127.0.0.1:7860";
+})();
 const iceServers = (() => {
   const fallback = [
     { urls: "stun:stun.l.google.com:19302" },
