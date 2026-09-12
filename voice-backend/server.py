@@ -1,12 +1,14 @@
 """Local Emma voice prototype. Run with .venv/bin/python server.py."""
 
 import asyncio
+import json
 import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
+from aiortc import RTCIceServer
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
@@ -46,7 +48,29 @@ REQUIRED = (
 ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
-ICE_SERVERS = [value.strip() for value in os.getenv("ICE_SERVERS", "").split(",") if value.strip()]
+def load_ice_servers() -> list[RTCIceServer]:
+    """Accept either a JSON ICE-server array or comma-separated URLs."""
+    raw = os.getenv("ICE_SERVERS", "").strip()
+    if not raw:
+        return []
+    try:
+        values = json.loads(raw)
+        if isinstance(values, list):
+            return [
+                RTCIceServer(
+                    urls=item["urls"],
+                    username=item.get("username"),
+                    credential=item.get("credential"),
+                )
+                for item in values
+                if isinstance(item, dict) and item.get("urls")
+            ]
+    except (json.JSONDecodeError, TypeError, KeyError):
+        pass
+    return [RTCIceServer(urls=value.strip()) for value in raw.split(",") if value.strip()]
+
+
+ICE_SERVERS = load_ice_servers()
 handler = SmallWebRTCRequestHandler(
     ice_servers=ICE_SERVERS or None,
     connection_mode=ConnectionMode.SINGLE,
