@@ -244,6 +244,11 @@ async def root():
 async def create_session():
     if missing := missing_settings():
         raise HTTPException(503, "Configure voice-backend/.env: " + ", ".join(missing))
+    if any(not task.done() for task in tasks):
+        raise HTTPException(
+            409,
+            "A voice session is already open. Wait for it to close, then try again.",
+        )
 
     session_id = secrets.token_urlsafe(12)
     room_name = f"emma-{session_id}"

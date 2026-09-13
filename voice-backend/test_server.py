@@ -63,6 +63,23 @@ class VoiceServerTests(unittest.TestCase):
         self.assertGreater(len(body["token"]), 20)
         create_worker.assert_called_once()
 
+    def test_second_active_session_is_rejected(self):
+        class ActiveTask:
+            def done(self):
+                return False
+
+        active_task = ActiveTask()
+        settings = {key: "test-placeholder" for key in server.REQUIRED}
+        server.tasks.add(active_task)
+        try:
+            with patch.dict(os.environ, settings):
+                response = self.client.post("/api/session", headers=self.origin)
+        finally:
+            server.tasks.discard(active_task)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("already open", response.json()["detail"])
+
     def test_pipeline_constructs_with_installed_services(self):
         settings = {key: "test-placeholder" for key in server.REQUIRED}
         settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"

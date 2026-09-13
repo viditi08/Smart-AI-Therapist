@@ -30,6 +30,7 @@ export function PipecatSession() {
   const [ending, setEnding] = useState(false);
   const [sessionSummary, setSessionSummary] = useState<string | null>(null);
   const clientRef = useRef<PipecatClient | null>(null);
+  const startingRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const generation = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -40,6 +41,7 @@ export function PipecatSession() {
   const lastEmma = [...messages].reverse().find((m) => m.role === "emma")?.text;
 
   const release = useCallback(() => {
+    startingRef.current = false;
     generation.current += 1;
     abortRef.current?.abort();
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -76,8 +78,9 @@ export function PipecatSession() {
   };
 
   async function start() {
-    if (clientRef.current) return;
+    if (clientRef.current || startingRef.current) return;
     release();
+    startingRef.current = true;
     const run = generation.current;
     const current = () => generation.current === run;
     setError(null);
@@ -129,6 +132,7 @@ export function PipecatSession() {
         callbacks: {
           onBotReady: () => {
             if (!current()) return;
+            startingRef.current = false;
             if (timerRef.current) clearTimeout(timerRef.current);
             setStage("listening");
           },
