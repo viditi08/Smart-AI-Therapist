@@ -3,6 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+import aiohttp
 from fastapi.testclient import TestClient
 
 import server
@@ -69,7 +70,10 @@ class VoiceServerTests(unittest.TestCase):
         async def build():
             token = server.make_livekit_token("test-room", "test-user", "Test")
             self.assertGreater(len(token), 20)
-            self.assertTrue(callable(server.create_worker("test-room", token)))
+            async with aiohttp.ClientSession() as http_session:
+                self.assertTrue(callable(server.create_worker(
+                    "test-room", token, http_session
+                )))
 
         with patch.dict(os.environ, settings):
             asyncio.run(build())

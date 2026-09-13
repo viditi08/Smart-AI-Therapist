@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
+import aiohttp
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +25,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregatorParams,
 )
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
 from pipecat.services.nvidia.llm import NvidiaLLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from pipecat.workers.runner import WorkerRunner
@@ -63,7 +64,11 @@ def make_livekit_token(room_name: str, identity: str, name: str) -> str:
     )
 
 
-def create_worker(room_name: str, bot_token: str):
+def create_worker(
+    room_name: str,
+    bot_token: str,
+    http_session: aiohttp.ClientSession,
+):
     transport = LiveKitTransport(
         url=os.environ["LIVEKIT_URL"].strip(),
         token=bot_token,
@@ -93,11 +98,13 @@ def create_worker(room_name: str, bot_token: str):
             + "\nUse short spoken turns, without markdown or emojis.",
         ),
     )
-    tts = ElevenLabsTTSService(
+    tts = ElevenLabsHttpTTSService(
         api_key=os.environ["ELEVENLABS_API_KEY"],
-        settings=ElevenLabsTTSService.Settings(
+        aiohttp_session=http_session,
+        settings=ElevenLabsHttpTTSService.Settings(
             voice=os.environ["ELEVENLABS_VOICE_ID"].strip(),
             model="eleven_flash_v2_5",
+            optimize_streaming_latency=3,
         ),
     )
     context = LLMContext()
@@ -149,8 +156,9 @@ def create_worker(room_name: str, bot_token: str):
 async def run_session_worker(room_name: str, bot_token: str):
     """Initialize providers outside the session-token request path."""
     try:
-        run = create_worker(room_name, bot_token)
-        await run()
+        async with aiohttp.ClientSession() as http_session:
+            run = create_worker(room_name, bot_token, http_session)
+            await run()
     except asyncio.CancelledError:
         raise
     except Exception:
