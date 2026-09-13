@@ -78,7 +78,6 @@ export function PipecatSession() {
   async function start() {
     if (clientRef.current) return;
     release();
-    await new Promise((resolve) => setTimeout(resolve, 400));
     const run = generation.current;
     const current = () => generation.current === run;
     setError(null);
@@ -94,19 +93,11 @@ export function PipecatSession() {
       );
     }, 45000);
     try {
-      const response = await fetch(`${backend}/health`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error("The Pipecat voice backend is unavailable.");
-      const health = (await response.json()) as {
-        ready: boolean;
-        missing: string[];
-      };
-      if (!health.ready) {
-        throw new Error(
-          `Configure voice-backend/.env: ${health.missing.join(", ")}`,
-        );
-      }
+      // Load the transport while Render wakes and creates the room.
+      const clientModules = Promise.all([
+        import("@pipecat-ai/client-js"),
+        import("@pipecat-ai/livekit-transport"),
+      ]);
       const sessionResponse = await fetch(`${backend}/api/session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -122,10 +113,7 @@ export function PipecatSession() {
         url: string;
         token: string;
       };
-      const [{ PipecatClient }, { LiveKitTransport }] = await Promise.all([
-        import("@pipecat-ai/client-js"),
-        import("@pipecat-ai/livekit-transport"),
-      ]);
+      const [{ PipecatClient }, { LiveKitTransport }] = await clientModules;
       if (!current()) return;
       const client = new PipecatClient({
         transport: new LiveKitTransport(),

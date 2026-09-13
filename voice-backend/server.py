@@ -15,7 +15,7 @@ from livekit import api as livekit_api
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -109,8 +109,9 @@ def create_worker(room_name: str, bot_token: str):
         if introduced:
             return
         introduced = True
-        context.add_message({"role": "user", "content": "Please introduce yourself briefly."})
-        await worker.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([
+            TTSSpeakFrame("Hi, I'm Emma. I'm here with you. What's on your mind?")
+        ])
 
     @transport.event_handler("on_participant_disconnected")
     async def disconnected(transport, participant_id):
@@ -132,6 +133,17 @@ def create_worker(room_name: str, bot_token: str):
             logger.exception("Voice session failed; check provider configuration and quota.")
 
     return run
+
+
+async def run_session_worker(room_name: str, bot_token: str):
+    """Initialize providers outside the session-token request path."""
+    try:
+        run = create_worker(room_name, bot_token)
+        await run()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Voice worker failed to initialize; check provider configuration.")
 
 
 @asynccontextmanager
@@ -182,8 +194,7 @@ async def create_session():
     room_name = f"emma-{session_id}"
     user_token = make_livekit_token(room_name, f"user-{session_id}", "Emma user")
     bot_token = make_livekit_token(room_name, f"emma-{session_id}", "Emma")
-    run = create_worker(room_name, bot_token)
-    task = asyncio.create_task(run())
+    task = asyncio.create_task(run_session_worker(room_name, bot_token))
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     return {
