@@ -142,7 +142,9 @@ def create_worker(connection):
             await runner.cancel()
             raise
         except Exception:
-            logger.warning("Voice session failed; check provider configuration and quota.")
+            # Keep credentials and conversation text out of logs, but retain
+            # the provider error so hosted deployments can be diagnosed.
+            logger.exception("Voice session failed; check provider configuration and quota.")
         finally:
             await connection.disconnect()
 
