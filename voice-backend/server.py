@@ -73,7 +73,9 @@ def load_ice_servers() -> list[RTCIceServer]:
 ICE_SERVERS = load_ice_servers()
 handler = SmallWebRTCRequestHandler(
     ice_servers=ICE_SERVERS or None,
-    connection_mode=ConnectionMode.SINGLE,
+    # Failed browser attempts can remain registered briefly while ICE tears
+    # down. Allow a fresh attempt instead of returning a misleading 400.
+    connection_mode=ConnectionMode.MULTIPLE,
 )
 tasks: set[asyncio.Task] = set()
 offer_lock = asyncio.Lock()
