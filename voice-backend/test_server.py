@@ -1,7 +1,7 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -26,42 +26,52 @@ class VoiceServerTests(unittest.TestCase):
         self.assertNotIn("NVIDIA_API_KEY", response.json()["missing"])
         self.assertNotIn("private-test-value", response.text)
 
-    def test_missing_keys_do_not_allocate_connection(self):
-        with patch.object(server.handler, "handle_web_request", new_callable=AsyncMock) as handler:
-            response = self.client.post("/api/offer", headers=self.origin,
-                                        json={"sdp": "test", "type": "offer"})
+    def test_missing_keys_do_not_create_worker(self):
+        with patch.object(server, "create_worker") as create_worker:
+            response = self.client.post("/api/session", headers=self.origin)
             self.assertEqual(response.status_code, 503)
-            handler.assert_not_called()
+            create_worker.assert_not_called()
 
     def test_foreign_and_absent_origins_are_rejected(self):
         for headers in ({}, {"Origin": "https://untrusted.example"}):
-            response = self.client.post("/api/offer", headers=headers,
-                                        json={"sdp": "test", "type": "offer"})
+            response = self.client.post("/api/session", headers=headers)
             self.assertEqual(response.status_code, 403)
 
     def test_local_preflight(self):
-        response = self.client.options("/api/offer", headers={
+        response = self.client.options("/api/session", headers={
             **self.origin, "Access-Control-Request-Method": "POST",
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["access-control-allow-origin"], self.origin["Origin"])
 
-    def test_invalid_offer_is_rejected(self):
-        response = self.client.post("/api/offer", headers=self.origin,
-                                    json={"sdp": "", "type": "answer"})
-        self.assertEqual(response.status_code, 422)
+    def test_session_returns_livekit_connection(self):
+        async def idle_worker():
+            await asyncio.sleep(0)
+
+        settings = {key: "test-placeholder" for key in server.REQUIRED}
+        settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"
+        with patch.dict(os.environ, settings), patch.object(
+            server, "create_worker", return_value=idle_worker
+        ) as create_worker:
+            response = self.client.post("/api/session", headers=self.origin)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["url"], settings["LIVEKIT_URL"])
+        self.assertTrue(body["room_name"].startswith("emma-"))
+        self.assertGreater(len(body["token"]), 20)
+        create_worker.assert_called_once()
 
     def test_pipeline_constructs_with_installed_services(self):
-        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        settings = {key: "test-placeholder" for key in server.REQUIRED}
+        settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"
 
         async def build():
-            connection = SmallWebRTCConnection(ice_servers=[])
-            try:
-                self.assertTrue(callable(server.create_worker(connection)))
-            finally:
-                await connection.disconnect()
+            token = server.make_livekit_token("test-room", "test-user", "Test")
+            self.assertGreater(len(token), 20)
+            self.assertTrue(callable(server.create_worker("test-room", token)))
 
-        with patch.dict(os.environ, {key: "test-placeholder" for key in server.REQUIRED}):
+        with patch.dict(os.environ, settings):
             asyncio.run(build())
 
 

@@ -20,20 +20,6 @@ const backend = (() => {
   }
   return "http://127.0.0.1:7860";
 })();
-const iceServers = (() => {
-  const fallback = [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-  ];
-  const raw = process.env.NEXT_PUBLIC_PIPECAT_ICE_SERVERS;
-  if (!raw) return fallback;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-})();
 
 type Stage = "idle" | "connecting" | "listening" | "speaking";
 
@@ -104,7 +90,7 @@ export function PipecatSession() {
       if (!current()) return;
       stop();
       setError(
-        "Connection timed out. Check the hosted backend URL, CORS settings, and TURN server configuration, then try again.",
+        "Connection timed out. Check the LiveKit and backend configuration, then try again.",
       );
     }, 45000);
     try {
@@ -121,16 +107,28 @@ export function PipecatSession() {
           `Configure voice-backend/.env: ${health.missing.join(", ")}`,
         );
       }
-      const [{ PipecatClient }, { SmallWebRTCTransport }] = await Promise.all([
+      const sessionResponse = await fetch(`${backend}/api/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+      });
+      if (!sessionResponse.ok) {
+        const detail = (await sessionResponse.json().catch(() => null)) as
+          | { detail?: string }
+          | null;
+        throw new Error(detail?.detail ?? "Could not create a LiveKit session.");
+      }
+      const connection = (await sessionResponse.json()) as {
+        url: string;
+        token: string;
+      };
+      const [{ PipecatClient }, { LiveKitTransport }] = await Promise.all([
         import("@pipecat-ai/client-js"),
-        import("@pipecat-ai/small-webrtc-transport"),
+        import("@pipecat-ai/livekit-transport"),
       ]);
       if (!current()) return;
       const client = new PipecatClient({
-        transport: new SmallWebRTCTransport({
-          iceServers,
-          waitForICEGathering: true,
-        }),
+        transport: new LiveKitTransport(),
         enableMic: true,
         enableCam: false,
         callbacks: {
@@ -177,9 +175,7 @@ export function PipecatSession() {
         },
       });
       clientRef.current = client;
-      await client.connect({
-        webrtcRequestParams: { endpoint: `${backend}/api/offer` },
-      });
+      await client.connect(connection);
       if (!current()) {
         client.enableMic(false);
         await client.disconnect();
@@ -191,7 +187,7 @@ export function PipecatSession() {
       setError(
         cause instanceof TypeError
           ? localBackend
-            ? "This live site is still pointing at localhost:7860. On Vercel, set NEXT_PUBLIC_PIPECAT_BACKEND_URL to your hosted Pipecat HTTPS URL, then Redeploy."
+            ? "Start the local voice backend on port 7860, then try again."
             : `Cannot reach the voice server at ${backend}. Start that host, allow this site in FRONTEND_ORIGINS, and check /health.`
           : cause instanceof Error
             ? /existing connection/i.test(cause.message)

@@ -1,18 +1,18 @@
-"""Local Emma voice prototype. Run with .venv/bin/python server.py."""
+"""Emma voice backend using LiveKit. Run with .venv/bin/python server.py."""
 
 import asyncio
-import json
 import os
+import secrets
 import sys
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from aiortc import RTCIceServer
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from livekit import api as livekit_api
 from loguru import logger
-from pydantic import BaseModel, Field
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
@@ -26,14 +26,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.nvidia.llm import NvidiaLLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.smallwebrtc.request_handler import (
-    ConnectionMode,
-    SmallWebRTCRequest,
-    SmallWebRTCRequestHandler,
-    SmallWebRTCPatchRequest,
-)
-from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from pipecat.workers.runner import WorkerRunner
 
 ROOT = Path(__file__).resolve().parent
@@ -44,56 +37,42 @@ logger.add(sys.stderr, level="WARNING")
 REQUIRED = (
     "NVIDIA_API_KEY", "NVIDIA_MODEL", "DEEPGRAM_API_KEY",
     "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID",
+    "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
 )
 ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
-def load_ice_servers() -> list[RTCIceServer]:
-    """Accept either a JSON ICE-server array or comma-separated URLs."""
-    raw = os.getenv("ICE_SERVERS", "").strip()
-    if raw.startswith("ICE_SERVERS="):
-        raw = raw.removeprefix("ICE_SERVERS=").strip()
-    if not raw:
-        return []
-    try:
-        values = json.loads(raw)
-        if isinstance(values, dict):
-            values = values.get("iceServers", [])
-        if isinstance(values, list):
-            servers = []
-            for item in values:
-                if not isinstance(item, dict) or not item.get("urls"):
-                    continue
-                urls = item["urls"] if isinstance(item["urls"], list) else [item["urls"]]
-                urls = [url for url in urls if isinstance(url, str) and url.startswith(("stun:", "turn:", "turns:"))]
-                if urls:
-                    servers.append(RTCIceServer(urls=urls, username=item.get("username"), credential=item.get("credential")))
-            return servers
-    except (json.JSONDecodeError, TypeError, KeyError):
-        pass
-    urls = [value.strip() for value in raw.split(",") if value.strip().startswith(("stun:", "turn:", "turns:"))]
-    return [RTCIceServer(urls=url) for url in urls]
-
-
-ICE_SERVERS = load_ice_servers()
-handler = SmallWebRTCRequestHandler(
-    ice_servers=ICE_SERVERS or None,
-    # Failed browser attempts can remain registered briefly while ICE tears
-    # down. Allow a fresh attempt instead of returning a misleading 400.
-    connection_mode=ConnectionMode.MULTIPLE,
-)
 tasks: set[asyncio.Task] = set()
-offer_lock = asyncio.Lock()
 
 
 def missing_settings():
     return [key for key in REQUIRED if not os.getenv(key, "").strip()]
 
 
-def create_worker(connection):
-    transport = SmallWebRTCTransport(connection, TransportParams(
-        audio_in_enabled=True, audio_out_enabled=True,
-    ))
+def make_livekit_token(room_name: str, identity: str, name: str) -> str:
+    return (
+        livekit_api.AccessToken(
+            os.environ["LIVEKIT_API_KEY"],
+            os.environ["LIVEKIT_API_SECRET"],
+        )
+        .with_identity(identity)
+        .with_name(name)
+        .with_ttl(timedelta(minutes=30))
+        .with_grants(livekit_api.VideoGrants(room_join=True, room=room_name))
+        .to_jwt()
+    )
+
+
+def create_worker(room_name: str, bot_token: str):
+    transport = LiveKitTransport(
+        url=os.environ["LIVEKIT_URL"].strip(),
+        token=bot_token,
+        room_name=room_name,
+        params=LiveKitParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+        ),
+    )
     stt = DeepgramFluxSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
@@ -122,13 +101,19 @@ def create_worker(connection):
     )
     runner = WorkerRunner(handle_sigint=False)
 
-    @worker.rtvi.event_handler("on_client_ready")
-    async def ready(rtvi):
+    introduced = False
+
+    @transport.event_handler("on_first_participant_joined")
+    async def first_participant_joined(transport, participant_id):
+        nonlocal introduced
+        if introduced:
+            return
+        introduced = True
         context.add_message({"role": "user", "content": "Please introduce yourself briefly."})
         await worker.queue_frames([LLMRunFrame()])
 
-    @transport.event_handler("on_client_disconnected")
-    async def disconnected(transport, client):
+    @transport.event_handler("on_participant_disconnected")
+    async def disconnected(transport, participant_id):
         await runner.cancel()
 
     async def run():
@@ -145,8 +130,6 @@ def create_worker(connection):
             # Keep credentials and conversation text out of logs, but retain
             # the provider error so hosted deployments can be diagnosed.
             logger.exception("Voice session failed; check provider configuration and quota.")
-        finally:
-            await connection.disconnect()
 
     return run
 
@@ -154,7 +137,6 @@ def create_worker(connection):
 @asynccontextmanager
 async def lifespan(app):
     yield
-    await handler.close()
     pending = list(tasks)
     for task in pending:
         task.cancel()
@@ -163,14 +145,14 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=ORIGINS,
-                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type"])
+                   allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
 
 
 @app.middleware("http")
 async def local_browser_only(request: Request, call_next):
     # CORS alone does not reject cross-origin POSTs. Reject before allocating a bot.
     origin = request.headers.get("origin")
-    if request.method in {"POST", "PATCH"} and origin not in ORIGINS:
+    if request.method == "POST" and origin not in ORIGINS:
         from fastapi.responses import JSONResponse
         return JSONResponse({"detail": "Local frontend origin required."}, status_code=403)
     return await call_next(request)
@@ -191,34 +173,24 @@ async def root():
     }
 
 
-class Offer(BaseModel):
-    sdp: str = Field(min_length=1, max_length=100_000)
-    type: str = Field(pattern="^offer$")
-    pc_id: str | None = None
-    restart_pc: bool | None = None
-
-
-@app.post("/api/offer")
-async def offer(body: Offer):
+@app.post("/api/session")
+async def create_session():
     if missing := missing_settings():
         raise HTTPException(503, "Configure voice-backend/.env: " + ", ".join(missing))
 
-    async def connected(connection):
-        run = create_worker(connection)
-        task = asyncio.create_task(run())
-        tasks.add(task)
-        task.add_done_callback(tasks.discard)
-
-    async with offer_lock:
-        return await handler.handle_web_request(
-            SmallWebRTCRequest(**body.model_dump()), connected,
-        )
-
-
-@app.patch("/api/offer")
-async def patch_offer(body: SmallWebRTCPatchRequest):
-    await handler.handle_patch_request(body)
-    return {"ok": True}
+    session_id = secrets.token_urlsafe(12)
+    room_name = f"emma-{session_id}"
+    user_token = make_livekit_token(room_name, f"user-{session_id}", "Emma user")
+    bot_token = make_livekit_token(room_name, f"emma-{session_id}", "Emma")
+    run = create_worker(room_name, bot_token)
+    task = asyncio.create_task(run())
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+    return {
+        "url": os.environ["LIVEKIT_URL"].strip(),
+        "token": user_token,
+        "room_name": room_name,
+    }
 
 
 if __name__ == "__main__":
