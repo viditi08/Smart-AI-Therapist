@@ -4,6 +4,7 @@ import asyncio
 import os
 import secrets
 import sys
+import warnings
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ from livekit import api as livekit_api
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -44,6 +46,17 @@ ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
 tasks: set[asyncio.Task] = set()
+LEGACY_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+FAST_DIALOGUE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+# Render's shared parent directory triggers this warning even though the app
+# only loads Pipecat's packaged local model data.
+warnings.filterwarnings(
+    "ignore",
+    message="NLTK will not authorize the non-private download directory.*",
+    category=UserWarning,
+    module="nltk.downloader",
+)
 
 
 def missing_settings():
@@ -69,13 +82,22 @@ def create_worker(
     bot_token: str,
     http_session: aiohttp.ClientSession,
 ):
+    configured_model = os.environ["NVIDIA_MODEL"].strip()
+    dialogue_model = (
+        FAST_DIALOGUE_MODEL
+        if configured_model == LEGACY_REASONING_MODEL
+        else configured_model
+    )
     transport = LiveKitTransport(
         url=os.environ["LIVEKIT_URL"].strip(),
         token=bot_token,
         room_name=room_name,
         params=LiveKitParams(
             audio_in_enabled=True,
+            audio_in_sample_rate=16000,
             audio_out_enabled=True,
+            audio_out_sample_rate=24000,
+            audio_out_10ms_chunks=10,
         ),
     )
     stt = DeepgramSTTService(
@@ -93,9 +115,13 @@ def create_worker(
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaLLMService.Settings(
-            model=os.environ["NVIDIA_MODEL"].strip(),
+            model=dialogue_model,
             system_instruction=(ROOT / "emma-prompt.txt").read_text()
             + "\nUse short spoken turns, without markdown or emojis.",
+            max_tokens=160,
+            temperature=1.0,
+            top_k=1,
+            extra={"chat_template_kwargs": {"enable_thinking": False}},
         ),
     )
     tts = ElevenLabsHttpTTSService(
@@ -108,9 +134,19 @@ def create_worker(
         ),
     )
     context = LLMContext()
-    user, assistant = LLMContextAggregatorPair(context, user_params=LLMUserAggregatorParams(
-        vad_analyzer=SileroVADAnalyzer(),
-    ))
+    user, assistant = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(
+                confidence=0.65,
+                start_secs=0.15,
+                stop_secs=0.35,
+                min_volume=0.5,
+            )),
+            audio_idle_timeout=3.0,
+            user_turn_stop_timeout=1.5,
+        ),
+    )
     worker = PipelineWorker(
         Pipeline([transport.input(), stt, user, llm, tts, transport.output(), assistant]),
         params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),

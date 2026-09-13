@@ -116,7 +116,14 @@ export function PipecatSession() {
       const [{ PipecatClient }, { LiveKitTransport }] = await clientModules;
       if (!current()) return;
       const client = new PipecatClient({
-        transport: new LiveKitTransport(),
+        transport: new LiveKitTransport({
+          audioCaptureDefaults: {
+            autoGainControl: true,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        }),
         enableMic: true,
         enableCam: false,
         callbacks: {
