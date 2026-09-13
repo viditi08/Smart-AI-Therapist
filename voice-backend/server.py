@@ -51,23 +51,28 @@ ORIGINS = [value.strip() for value in os.getenv(
 def load_ice_servers() -> list[RTCIceServer]:
     """Accept either a JSON ICE-server array or comma-separated URLs."""
     raw = os.getenv("ICE_SERVERS", "").strip()
+    if raw.startswith("ICE_SERVERS="):
+        raw = raw.removeprefix("ICE_SERVERS=").strip()
     if not raw:
         return []
     try:
         values = json.loads(raw)
+        if isinstance(values, dict):
+            values = values.get("iceServers", [])
         if isinstance(values, list):
-            return [
-                RTCIceServer(
-                    urls=item["urls"],
-                    username=item.get("username"),
-                    credential=item.get("credential"),
-                )
-                for item in values
-                if isinstance(item, dict) and item.get("urls")
-            ]
+            servers = []
+            for item in values:
+                if not isinstance(item, dict) or not item.get("urls"):
+                    continue
+                urls = item["urls"] if isinstance(item["urls"], list) else [item["urls"]]
+                urls = [url for url in urls if isinstance(url, str) and url.startswith(("stun:", "turn:", "turns:"))]
+                if urls:
+                    servers.append(RTCIceServer(urls=urls, username=item.get("username"), credential=item.get("credential")))
+            return servers
     except (json.JSONDecodeError, TypeError, KeyError):
         pass
-    return [RTCIceServer(urls=value.strip()) for value in raw.split(",") if value.strip()]
+    urls = [value.strip() for value in raw.split(",") if value.strip().startswith(("stun:", "turn:", "turns:"))]
+    return [RTCIceServer(urls=url) for url in urls]
 
 
 ICE_SERVERS = load_ice_servers()
