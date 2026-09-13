@@ -140,7 +140,7 @@ def create_worker(
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
                 confidence=0.65,
                 start_secs=0.15,
-                stop_secs=0.35,
+                stop_secs=0.2,
                 min_volume=0.5,
             )),
             audio_idle_timeout=3.0,
