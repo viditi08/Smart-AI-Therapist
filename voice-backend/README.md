@@ -1,7 +1,7 @@
 # Emma LiveKit voice backend
 
 Emma's Next.js interface joins a private LiveKit room with this Python/Pipecat
-worker. The spoken pipeline is Deepgram Flux → NVIDIA-hosted dialogue model →
+worker. The spoken pipeline is Deepgram Nova-3 → NVIDIA-hosted dialogue model →
 ElevenLabs Flash v2.5. LiveKit carries browser and bot audio, so this project no
 longer needs custom Metered TURN or SmallWebRTC configuration.
 

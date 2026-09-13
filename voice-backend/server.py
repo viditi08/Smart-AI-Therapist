@@ -23,7 +23,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.nvidia.llm import NvidiaLLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
@@ -73,7 +73,18 @@ def create_worker(room_name: str, bot_token: str):
             audio_out_enabled=True,
         ),
     )
-    stt = DeepgramFluxSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = DeepgramSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        settings=DeepgramSTTService.Settings(
+            model="nova-3-general",
+            language="en-US",
+            interim_results=True,
+            endpointing=300,
+            utterance_end_ms=1000,
+            punctuate=True,
+            smart_format=True,
+        ),
+    )
     llm = NvidiaLLMService(
         api_key=os.environ["NVIDIA_API_KEY"],
         settings=NvidiaLLMService.Settings(
