@@ -3,8 +3,9 @@ import os
 import unittest
 from unittest.mock import patch
 
-import aiohttp
 from fastapi.testclient import TestClient
+from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
+from pipecat.services.tts_service import TTSService
 
 import server
 
@@ -17,6 +18,9 @@ class VoiceServerTests(unittest.TestCase):
         self.origin = {"Origin": "http://localhost:3000"}
 
     def tearDown(self):
+        for task in list(server.tasks):
+            task.cancel()
+        server.tasks.clear()
         self.client.close()
         self.env.stop()
 
@@ -63,22 +67,66 @@ class VoiceServerTests(unittest.TestCase):
         self.assertGreater(len(body["token"]), 20)
         create_worker.assert_called_once()
 
-    def test_second_active_session_is_rejected(self):
-        class ActiveTask:
-            def done(self):
-                return False
+    def test_health_and_root_accept_head(self):
+        self.assertEqual(self.client.head("/health").status_code, 200)
+        self.assertEqual(self.client.head("/").status_code, 200)
 
-        active_task = ActiveTask()
+    def test_vercel_origin_can_create_a_session(self):
+        async def idle_worker():
+            await asyncio.sleep(0)
+
         settings = {key: "test-placeholder" for key in server.REQUIRED}
-        server.tasks.add(active_task)
-        try:
-            with patch.dict(os.environ, settings):
-                response = self.client.post("/api/session", headers=self.origin)
-        finally:
-            server.tasks.discard(active_task)
+        settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"
+        with patch.dict(os.environ, settings), patch.object(
+            server, "create_worker", return_value=idle_worker
+        ):
+            response = self.client.post(
+                "/api/session",
+                headers={"Origin": "https://smart-ai-therapist.vercel.app"},
+            )
+        self.assertEqual(response.status_code, 200)
 
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("already open", response.json()["detail"])
+    def test_secret_allows_server_proxy_without_origin(self):
+        async def idle_worker():
+            await asyncio.sleep(0)
+
+        settings = {key: "test-placeholder" for key in server.REQUIRED}
+        settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"
+        settings["VOICE_BACKEND_SECRET"] = "test-secret"
+        with patch.dict(os.environ, settings), patch.object(
+            server, "create_worker", return_value=idle_worker
+        ):
+            denied = self.client.post("/api/session", headers=self.origin)
+            allowed = self.client.post(
+                "/api/session",
+                headers={"X-Voice-Secret": "test-secret"},
+            )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_second_session_replaces_the_first(self):
+        async def hang_worker():
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                raise
+
+        settings = {key: "test-placeholder" for key in server.REQUIRED}
+        settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"
+        with patch.dict(os.environ, settings), patch.object(
+            server, "create_worker", return_value=hang_worker
+        ):
+            first = self.client.post("/api/session", headers=self.origin)
+            second = self.client.post("/api/session", headers=self.origin)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertNotEqual(first.json()["room_name"], second.json()["room_name"])
+
+    def test_prompt_includes_crisis_guidance(self):
+        prompt = (server.ROOT / "emma-prompt.txt").read_text()
+        self.assertIn("988", prompt)
+        self.assertIn("not a licensed clinician", prompt.lower())
 
     def test_pipeline_constructs_with_installed_services(self):
         settings = {key: "test-placeholder" for key in server.REQUIRED}
@@ -87,13 +135,26 @@ class VoiceServerTests(unittest.TestCase):
         async def build():
             token = server.make_livekit_token("test-room", "test-user", "Test")
             self.assertGreater(len(token), 20)
-            async with aiohttp.ClientSession() as http_session:
-                self.assertTrue(callable(server.create_worker(
-                    "test-room", token, http_session
-                )))
+            self.assertTrue(callable(server.create_worker("test-room", token)))
 
         with patch.dict(os.environ, settings):
             asyncio.run(build())
+
+    def test_intro_and_probes_are_defined(self):
+        self.assertIn("Emma", server.INTRO)
+        mic = server.MicAudioProbe()
+        self.assertTrue(callable(mic.process_frame))
+        self.assertEqual(mic._chunks, 0)
+        latency = server.ReplyLatencyProbe()
+        self.assertTrue(callable(latency.process_frame))
+        self.assertIsNone(latency._turn_ended_at)
+        self.assertTrue(issubclass(server.EmmaDeepgramSTTService, server.DeepgramSTTService))
+
+    def test_tts_keeps_one_streaming_connection(self):
+        # HTTP synthesis pays a fresh handshake per reply, which shows up as a
+        # pause before Emma speaks.
+        self.assertTrue(issubclass(server.ElevenLabsTTSService, TTSService))
+        self.assertFalse(issubclass(server.ElevenLabsTTSService, ElevenLabsHttpTTSService))
 
 
 if __name__ == "__main__":
