@@ -3,42 +3,39 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PipecatClient } from "@pipecat-ai/client-js";
+import { CrisisModal } from "@/components/crisis-modal";
+import { detectCrisis } from "@/lib/crisis-detection";
 import { springBouncy } from "@/lib/motion-presets";
+import type { CrisisLevel } from "@/lib/pipeline-types";
 import {
-  saveConversation,
+  persistConversation,
   type SavedChatMessage,
 } from "@/lib/session-history-storage";
 
-const backend = (() => {
-  if (process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL) {
-    return process.env.NEXT_PUBLIC_PIPECAT_BACKEND_URL.replace(/\/$/, "");
-  }
-  // Keep local development pointed at the local server, but make a hosted
-  // build usable even if Vercel's environment variable was omitted.
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-    return "https://smart-ai-therapist.onrender.com";
-  }
-  return "http://127.0.0.1:7860";
-})();
-
 type Stage = "idle" | "connecting" | "listening" | "speaking";
+
+const INTRO = "Hi, I'm Emma. I'm here with you. What's on your mind?";
 
 export function PipecatSession() {
   const [stage, setStage] = useState<Stage>("idle");
   const [messages, setMessages] = useState<SavedChatMessage[]>([]);
+  const [liveYou, setLiveYou] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const [sessionSummary, setSessionSummary] = useState<string | null>(null);
+  const [crisis, setCrisis] = useState<Exclude<CrisisLevel, "none"> | null>(null);
   const clientRef = useRef<PipecatClient | null>(null);
+  const messagesRef = useRef<SavedChatMessage[]>([]);
   const startingRef = useRef(false);
+  const userStoppedRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const generation = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const live = stage === "listening" || stage === "speaking";
 
-  const lastYou = [...messages].reverse().find((m) => m.role === "user")?.text;
-  const lastEmma = [...messages].reverse().find((m) => m.role === "emma")?.text;
+  messagesRef.current = messages;
+  const recent = messages.slice(-4);
 
   const release = useCallback(() => {
     startingRef.current = false;
@@ -58,7 +55,9 @@ export function PipecatSession() {
 
   useEffect(() => release, [release]);
 
-  const stop = useCallback(() => {
+  const stop = useCallback((fromUser = true) => {
+    userStoppedRef.current = fromUser;
+    setLiveYou("");
     release();
     setStage("idle");
   }, [release]);
@@ -68,10 +67,9 @@ export function PipecatSession() {
     setMessages((previous) => {
       const last = previous.at(-1);
       if (last?.role === role) {
-        return [
-          ...previous.slice(0, -1),
-          { ...last, text: `${last.text} ${text}` },
-        ];
+        const nextText =
+          role === "emma" ? `${last.text}${text}` : `${last.text} ${text}`;
+        return [...previous.slice(0, -1), { ...last, text: nextText }];
       }
       return [...previous, { id: crypto.randomUUID(), role, text }];
     });
@@ -83,8 +81,11 @@ export function PipecatSession() {
     startingRef.current = true;
     const run = generation.current;
     const current = () => generation.current === run;
+    userStoppedRef.current = false;
     setError(null);
     setSessionSummary(null);
+    setCrisis(null);
+    setLiveYou("");
     setStage("connecting");
     const controller = new AbortController();
     abortRef.current = controller;
@@ -101,7 +102,7 @@ export function PipecatSession() {
         import("@pipecat-ai/client-js"),
         import("@pipecat-ai/livekit-transport"),
       ]);
-      const sessionResponse = await fetch(`${backend}/api/session`, {
+      const sessionResponse = await fetch("/api/voice/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
@@ -120,11 +121,12 @@ export function PipecatSession() {
       if (!current()) return;
       const client = new PipecatClient({
         transport: new LiveKitTransport({
+          webAudioMix: false,
           audioCaptureDefaults: {
             autoGainControl: true,
             channelCount: 1,
             echoCancellation: true,
-            noiseSuppression: true,
+            noiseSuppression: false,
           },
         }),
         enableMic: true,
@@ -135,40 +137,77 @@ export function PipecatSession() {
             startingRef.current = false;
             if (timerRef.current) clearTimeout(timerRef.current);
             setStage("listening");
+            setMessages((previous) =>
+              previous.some((message) => message.role === "emma")
+                ? previous
+                : [{ id: crypto.randomUUID(), role: "emma", text: INTRO }],
+            );
+          },
+          onDeviceError: () => {
+            if (current()) {
+              setError(
+                "Microphone is blocked. Allow access in the browser, then try again.",
+              );
+            }
           },
           onDisconnected: () => {
-            if (current()) stop();
+            if (!current()) return;
+            const fromUser = userStoppedRef.current;
+            stop(false);
+            if (!fromUser) {
+              setError("Emma lost the connection. Tap Continue and speak again.");
+            }
           },
           onError: () => {
             if (current()) {
               stop();
               setError(
-                "Voice connection failed. Check provider keys, model access, and quota.",
+                "Emma could not start listening. Check the microphone, then try again.",
               );
             }
           },
           onTrackStarted: (track, participant) => {
             if (!current() || participant?.local || track.kind !== "audio") return;
             const audio = audioRef.current;
-            if (audio) {
+            if (!audio) return;
+            const currentStream = audio.srcObject;
+            const alreadyAttached =
+              currentStream instanceof MediaStream &&
+              currentStream.getAudioTracks().some((existing) => existing.id === track.id);
+            if (!alreadyAttached) {
               audio.srcObject = new MediaStream([track]);
-              void audio.play().catch(() => {
-                if (current()) {
-                  setError("Press play on the audio control to hear Emma.");
-                }
-              });
             }
+            audio.muted = false;
+            audio.volume = 1;
+            void audio.play().catch(() => {
+              if (current()) {
+                setError("Click the page once so your browser can play Emma’s voice.");
+              }
+            });
           },
           onBotStartedSpeaking: () => {
-            if (current()) setStage("speaking");
+            if (!current()) return;
+            setStage("speaking");
+            void audioRef.current?.play().catch(() => {});
           },
           onBotStoppedSpeaking: () => {
             if (current()) setStage("listening");
           },
-          onUserTranscript: (data) => {
-            if (current() && data.final) append("user", data.text);
+          onUserStartedSpeaking: () => {
+            if (current()) setStage("listening");
           },
-          onBotTtsText: (data) => {
+          onUserTranscript: (data) => {
+            if (!current() || !data.text.trim()) return;
+            setLiveYou(data.text);
+            if (!data.final) return;
+            append("user", data.text);
+            setLiveYou("");
+            const detected = detectCrisis(data.text);
+            if (detected.level === "none") return;
+            setCrisis(detected.level);
+            if (detected.level === "imminent") stop();
+          },
+          onBotLlmText: (data) => {
             if (current()) append("emma", data.text);
           },
         },
@@ -176,49 +215,27 @@ export function PipecatSession() {
       clientRef.current = client;
       await client.connect(connection);
       if (!current()) {
-        client.enableMic(false);
+        await client.enableMic(false);
         await client.disconnect();
       }
     } catch (cause) {
       if (!current()) return;
       stop();
-      const localBackend = backend.includes("127.0.0.1") || backend.includes("localhost");
       setError(
-        cause instanceof TypeError
-          ? localBackend
-            ? "Start the local voice backend on port 7860, then try again."
-            : `Cannot reach the voice server at ${backend}. Start that host, allow this site in FRONTEND_ORIGINS, and check /health.`
-          : cause instanceof Error
-            ? /existing connection/i.test(cause.message)
-              ? "A session is already open. Tap Pause, wait a second, then Start talking again."
-              : cause.message
-            : "Could not start voice session.",
+        cause instanceof Error ? cause.message : "Could not start voice session.",
       );
     }
   }
 
   async function endSession() {
     setEnding(true);
+    const snapshot = messagesRef.current;
     stop();
     try {
-      if (messages.length === 0) return;
-      const auth = await fetch("/api/auth/session");
-      const session = auth.ok
-        ? ((await auth.json()) as { user?: { id?: string } | null } | null)
-        : null;
-      if (session?.user?.id) {
-        const result = await fetch("/api/chats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages }),
-        });
-        if (!result.ok) throw new Error("Could not save to your account.");
-        setSessionSummary("Saved to your account.");
-      } else {
-        const result = saveConversation(messages);
-        if (!result.ok) throw new Error(result.error);
-        setSessionSummary("Saved on this device. Sign in to save to your account.");
-      }
+      if (snapshot.length === 0) return;
+      const result = await persistConversation(snapshot);
+      if (!result.ok) throw new Error(result.error);
+      setSessionSummary(result.summary);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save.");
     } finally {
@@ -298,28 +315,30 @@ export function PipecatSession() {
             >
               {error}
             </motion.p>
-          ) : lastYou && stage === "listening" ? (
-            <motion.p
-              key={lastYou}
-              className="talk-line talk-line-you"
+          ) : recent.length > 0 || liveYou ? (
+            <motion.div
+              key="transcript"
+              className="talk-transcript"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
             >
-              <span>You</span>
-              {lastYou}
-            </motion.p>
-          ) : lastEmma ? (
-            <motion.p
-              key={lastEmma}
-              className="talk-line talk-line-emma"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              <span>Emma</span>
-              {lastEmma}
-            </motion.p>
+              {recent.map((message) => (
+                <p
+                  key={message.id}
+                  className={`talk-line ${message.role === "user" ? "talk-line-you" : "talk-line-emma"}`}
+                >
+                  <span>{message.role === "user" ? "You" : "Emma"}</span>
+                  {message.text}
+                </p>
+              ))}
+              {liveYou ? (
+                <p className="talk-line talk-line-you talk-line-live">
+                  <span>You</span>
+                  {liveYou}
+                </p>
+              ) : null}
+            </motion.div>
           ) : (
             <p className="talk-line talk-line-empty">
               A quiet space to say what's on your mind.
@@ -331,7 +350,9 @@ export function PipecatSession() {
       <motion.button
         type="button"
         className={`talk-cta${live ? " is-live" : ""}`}
-        onClick={() => (live || stage === "connecting" ? stop() : void start())}
+        onClick={() =>
+          live || stage === "connecting" ? stop(true) : void start()
+        }
         whileTap={{ scale: 0.97 }}
         transition={springBouncy}
       >
@@ -364,7 +385,17 @@ export function PipecatSession() {
 
       {sessionSummary ? <p className="talk-summary">{sessionSummary}</p> : null}
 
-      <audio ref={audioRef} autoPlay className="sr-only" aria-label="Emma’s voice" />
+      {crisis ? (
+        <CrisisModal level={crisis} onDismiss={() => setCrisis(null)} />
+      ) : null}
+
+      <audio
+        ref={audioRef}
+        autoPlay
+        playsInline
+        className="sr-only"
+        aria-label="Emma’s voice"
+      />
     </div>
   );
 }
