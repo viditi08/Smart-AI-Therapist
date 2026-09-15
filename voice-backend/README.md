@@ -21,11 +21,13 @@ LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
 FRONTEND_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+VOICE_BACKEND_SECRET=
 PORT=7860
 ```
 
-Never put API secrets in a `NEXT_PUBLIC_` variable. The backend creates short-lived
-LiveKit room tokens; the browser receives only its temporary participant token.
+Never put API secrets in a `NEXT_PUBLIC_` variable. The Next.js app creates the
+room through `/api/voice/session` and forwards `VOICE_BACKEND_SECRET`. The
+browser receives only a temporary LiveKit participant token.
 
 ## Run locally
 
@@ -43,8 +45,8 @@ npm run dev
 ```
 
 Open `http://localhost:3000/session/voice`, click **Start talking**, and allow the
-microphone. The frontend checks `/health`, asks `/api/session` for a LiveKit room,
-then connects the browser and Pipecat worker to that room.
+microphone. The Next.js app asks this server for a LiveKit room, then the
+browser and Pipecat worker both join that room.
 
 ## Fresh installation and verification
 
@@ -69,15 +71,15 @@ On Render, keep the service root at `voice-backend`, install from
 LiveKit variables shown above. Set `FRONTEND_ORIGINS` to the exact Vercel origin,
 for example `https://smart-ai-therapist.vercel.app`.
 
-On Vercel, set only this voice connection variable:
+On Vercel, set the server-side backend URL and the same secret as Render:
 
 ```env
-NEXT_PUBLIC_PIPECAT_BACKEND_URL=https://smart-ai-therapist.onrender.com
+PIPECAT_BACKEND_URL=https://smart-ai-therapist.onrender.com
+VOICE_BACKEND_SECRET=choose-a-long-random-string
 ```
 
-Redeploy both services after changing variables. `ICE_SERVERS` and
-`NEXT_PUBLIC_PIPECAT_ICE_SERVERS` can be deleted because LiveKit manages WebRTC
-connectivity. Render free instances can take time to wake after inactivity.
+Redeploy both services after changing variables. Render free instances can take
+time to wake after inactivity.
 
 Implementation references: [LiveKit transport](https://docs.pipecat.ai/api-reference/server/services/transport/livekit),
 [Deepgram](https://docs.pipecat.ai/api-reference/server/services/stt/deepgram),

@@ -14,11 +14,11 @@ Emma is **not** a substitute for emergency services, diagnosis, or care from a l
 **Voice (`/session/voice`)** is a Pipecat process (Python). The browser opens a WebRTC line to it:
 
 ```
-Mic  ──►  Pipecat (Deepgram Flux → NVIDIA NIM → ElevenLabs)  ──►  Speaker
-          voice-backend on port 7860
+Mic  ──►  LiveKit  ──►  Pipecat (Deepgram → NVIDIA NIM → ElevenLabs)  ──►  Speaker
+                        voice-backend on port 7860
 ```
 
-Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **not** run this Python process — run it locally or host it on Railway, Fly, or a VM, then set `NEXT_PUBLIC_PIPECAT_BACKEND_URL`.
+Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **not** run this Python process — run it locally or host it on Render, Railway, Fly, or a VM, then set `PIPECAT_BACKEND_URL`.
 
 **Text (`/session/pipeline`)** uses Next.js `/api/pipeline/turn` and `/api/pipeline/summarize`.
 
@@ -155,9 +155,10 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
    | `ELEVENLABS_VOICE_ID` | Optional; defaults to `21m00Tcm4TlvDq8ikWAM` |
    | `AUTH_URL` | `https://smart-ai-therapist.vercel.app` (no trailing slash) |
    | `AUTH_TRUST_HOST` | `true` |
-   | `NEXT_PUBLIC_PIPECAT_BACKEND_URL` | Public HTTPS origin of the Python Pipecat server (not Vercel) |
+   | `PIPECAT_BACKEND_URL` | Public HTTPS origin of the Python Pipecat server (not Vercel) |
+   | `VOICE_BACKEND_SECRET` | Same random string as on the Python host |
 
-Voice will not work on Vercel alone. Host `voice-backend/` on Railway, Fly.io, or a VM, set `FRONTEND_ORIGINS` there to your Vercel URL, then set `NEXT_PUBLIC_PIPECAT_BACKEND_URL` to that Python URL.
+Voice will not work on Vercel alone. Host `voice-backend/` on Render, Railway, Fly.io, or a VM with LiveKit Cloud credentials, set `VOICE_BACKEND_SECRET` on both hosts, then set `PIPECAT_BACKEND_URL` to the Python URL.
 
 3. Run **Neon migrations** before or on first deploy (`npm run db:migrate:neon` locally against Neon, or rely on `build:production` if `DATABASE_URL` is set in Vercel).
 

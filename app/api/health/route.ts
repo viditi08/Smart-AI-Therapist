@@ -24,3 +24,5 @@ export function GET() {
       : "Add NVIDIA_API_KEY to .env.local and restart npm run dev. Voice keys live in voice-backend/.env.",
   });
 }
+
+export const HEAD = GET;
