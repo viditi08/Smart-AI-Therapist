@@ -18,6 +18,7 @@ import {
   summarizePipelineSession,
 } from "@/lib/pipeline-client";
 import type { CrisisLevel, TurnMetrics } from "@/lib/pipeline-types";
+import { persistConversation } from "@/lib/session-history-storage";
 import { bubbleIn, metricsPulse, metricValuePop, springBouncy } from "@/lib/motion-presets";
 
 type UiMessage = {
@@ -182,17 +183,24 @@ export function TextPipelineSession() {
   }, []);
 
   const endSession = useCallback(async () => {
-    const transcript = messages
+    const saved = messages
       .filter((m) => m.id !== "welcome" && m.text.trim())
       .map((m) => ({
-        role: m.role === "emma" ? ("assistant" as const) : ("user" as const),
-        content: m.text,
+        id: m.id,
+        role: m.role,
+        text: m.text,
       }));
+    const transcript = saved.map((m) => ({
+      role: m.role === "emma" ? ("assistant" as const) : ("user" as const),
+      content: m.text,
+    }));
     if (transcript.length === 0) return;
     setEnding(true);
     try {
+      const persisted = await persistConversation(saved);
+      if (!persisted.ok) throw new Error(persisted.error);
       const summary = await summarizePipelineSession(transcript);
-      setSessionSummary(summary);
+      setSessionSummary(`${persisted.summary} ${summary}`.trim());
     } catch (e) {
       setError(friendlyFetchError(e));
     } finally {

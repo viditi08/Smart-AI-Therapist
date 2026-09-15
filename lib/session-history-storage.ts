@@ -87,6 +87,40 @@ export function deleteSavedSession(id: string): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
+export async function persistConversation(
+  messages: SavedChatMessage[],
+): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
+  if (messages.length === 0) {
+    return { ok: false, error: "Nothing to save yet." };
+  }
+  try {
+    const auth = await fetch("/api/auth/session", { credentials: "same-origin" });
+    const session = auth.ok
+      ? ((await auth.json()) as { user?: { id?: string } | null } | null)
+      : null;
+    if (session?.user?.id) {
+      const result = await fetch("/api/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ messages }),
+      });
+      if (!result.ok) {
+        return { ok: false, error: "Could not save to your account." };
+      }
+      return { ok: true, summary: "Saved to your account." };
+    }
+    const result = saveConversation(messages);
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      summary: "Saved on this device. Sign in to save to your account.",
+    };
+  } catch {
+    return { ok: false, error: "Could not save." };
+  }
+}
+
 export function saveConversation(
   messages: SavedChatMessage[],
   titleOverride?: string,
