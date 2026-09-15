@@ -31,7 +31,7 @@ export const SUMMARIZE_EVERY_N_TURNS = 6;
 export const KEEP_RAW_TURNS_AFTER_SUMMARY = 6;
 
 /** Fastest model verified on this NVIDIA account; used when none is configured. */
-export const DEFAULT_TEXT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+export const DEFAULT_TEXT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
 
 /**
  * Tried in order when the configured model keeps failing — NIM returns 503 when a
