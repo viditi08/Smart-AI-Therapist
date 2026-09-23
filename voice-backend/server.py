@@ -218,6 +218,18 @@ def introduction_for(user_name: str | None) -> str:
     return f"Hi {first_name}, I'm Emma. I'm here with you. What's on your mind?"
 
 
+def nvidia_extra_parameters(model: str) -> dict:
+    if "nemotron" not in model:
+        return {}
+    # Pipecat expands Settings.extra into OpenAI SDK keyword arguments.
+    # NVIDIA-specific request fields therefore belong under extra_body.
+    return {
+        "extra_body": {
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+    }
+
+
 def origin_allowed(origin: str | None) -> bool:
     if not origin:
         return False
@@ -284,7 +296,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     # Nemotron supports hidden reasoning, but it adds avoidable latency to a
     # live spoken turn. Other model families can reject this extra argument.
     if "nemotron" in dialogue_model:
-        llm_settings["extra"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        llm_settings["extra"] = nvidia_extra_parameters(dialogue_model)
     transport = LiveKitTransport(
         url=os.environ["LIVEKIT_URL"].strip(),
         token=bot_token,

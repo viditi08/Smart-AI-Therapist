@@ -148,6 +148,14 @@ class VoiceServerTests(unittest.TestCase):
             "Hi Maya, I'm Emma. I'm here with you. What's on your mind?",
         )
         self.assertEqual(server.normalize_person_name("  Maya   Patel  "), "Maya Patel")
+        self.assertEqual(
+            server.nvidia_extra_parameters("nvidia/nemotron-3.5-lightning-30b-a3b"),
+            {
+                "extra_body": {
+                    "chat_template_kwargs": {"enable_thinking": False},
+                },
+            },
+        )
         mic = server.MicAudioProbe()
         self.assertTrue(callable(mic.process_frame))
         self.assertEqual(mic._chunks, 0)
