@@ -141,12 +141,12 @@ class VoiceServerTests(unittest.TestCase):
             asyncio.run(build())
 
     def test_intro_and_probes_are_defined(self):
-        self.assertIn("Emma", server.INTRO)
-        self.assertIn("what would you like me to call you", server.INTRO.lower())
-        self.assertEqual(
-            server.introduction_for("Maya Patel"),
-            "Hi Maya, I'm Emma. I'm here with you. What's on your mind?",
-        )
+        guest_prompt = server.introduction_prompt_for(None)
+        named_prompt = server.introduction_prompt_for("Maya Patel")
+        self.assertIn("Emma", guest_prompt)
+        self.assertIn("what I would like you to call me", guest_prompt)
+        self.assertIn("Maya", named_prompt)
+        self.assertIn("what is on their mind", named_prompt)
         self.assertEqual(server.normalize_person_name("  Maya   Patel  "), "Maya Patel")
         self.assertEqual(
             server.nvidia_extra_parameters("nvidia/nemotron-3.5-lightning-30b-a3b"),
@@ -172,6 +172,19 @@ class VoiceServerTests(unittest.TestCase):
         # pause before Emma speaks.
         self.assertTrue(issubclass(server.ElevenLabsTTSService, TTSService))
         self.assertFalse(issubclass(server.ElevenLabsTTSService, ElevenLabsHttpTTSService))
+
+    def test_consecutive_turns_are_driven_by_transcripts(self):
+        params = server.voice_user_params()
+        self.assertIsNone(params.vad_analyzer)
+        self.assertEqual(len(params.user_turn_strategies.start), 1)
+        self.assertIsInstance(
+            params.user_turn_strategies.start[0],
+            server.TranscriptionUserTurnStartStrategy,
+        )
+        self.assertIsInstance(
+            params.user_turn_strategies.stop[0],
+            server.SpeechTimeoutUserTurnStopStrategy,
+        )
 
 
 if __name__ == "__main__":

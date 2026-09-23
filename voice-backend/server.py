@@ -36,16 +36,13 @@ def _audio_stream_init(self, track, *args, **kwargs):
 
 livekit_rtc.AudioStream.__init__ = _audio_stream_init
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    LLMRunFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
-    TTSSpeakFrame,
     UserStoppedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker, ProcessorUnusablePolicy
@@ -59,10 +56,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.nvidia.llm import NvidiaLLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
-from pipecat.turns.user_start import (
-    TranscriptionUserTurnStartStrategy,
-    VADUserTurnStartStrategy,
-)
+from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -86,7 +80,6 @@ tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
 LEGACY_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 FAST_DIALOGUE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-INTRO = "Hi, I'm Emma. Before we begin, what would you like me to call you?"
 SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
 QUIET_MIC_CHUNKS = 750
@@ -159,29 +152,19 @@ class MicAudioProbe(FrameProcessor):
 
 
 class ReplyLatencyProbe(FrameProcessor):
-    """Splits each reply gap into turn detection time and provider time."""
+    """Reports provider latency after a finalized user turn."""
 
     def __init__(self):
         super().__init__()
-        self._speech_ended_at: float | None = None
         self._turn_ended_at: float | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, VADUserStoppedSpeakingFrame):
-            self._speech_ended_at = time.monotonic()
-        elif isinstance(frame, UserStoppedSpeakingFrame):
+        if isinstance(frame, UserStoppedSpeakingFrame):
             self._turn_ended_at = time.monotonic()
         elif isinstance(frame, TTSAudioRawFrame) and self._turn_ended_at is not None:
-            spoke_at = self._speech_ended_at or self._turn_ended_at
             now = time.monotonic()
-            logger.info(
-                "Reply gap {:.2f}s (turn detection {:.2f}s, providers {:.2f}s).",
-                now - spoke_at,
-                self._turn_ended_at - spoke_at,
-                now - self._turn_ended_at,
-            )
-            self._speech_ended_at = None
+            logger.info("Provider reply latency {:.2f}s.", now - self._turn_ended_at)
             self._turn_ended_at = None
         await self.push_frame(frame, direction)
 
@@ -225,12 +208,18 @@ def normalize_person_name(value: str | None) -> str | None:
     return name[:60] or None
 
 
-def introduction_for(user_name: str | None) -> str:
+def introduction_prompt_for(user_name: str | None) -> str:
     name = normalize_person_name(user_name)
     if not name:
-        return INTRO
+        return (
+            "Open this voice conversation with one warm, natural sentence. "
+            "Introduce yourself as Emma and ask what I would like you to call me."
+        )
     first_name = name.split()[0]
-    return f"Hi {first_name}, I'm Emma. I'm here with you. What's on your mind?"
+    return (
+        f"Open this voice conversation with one warm, natural sentence for {first_name}. "
+        "Introduce yourself as Emma and ask what is on their mind."
+    )
 
 
 def nvidia_extra_parameters(model: str) -> dict:
@@ -243,6 +232,21 @@ def nvidia_extra_parameters(model: str) -> dict:
             "chat_template_kwargs": {"enable_thinking": False},
         },
     }
+
+
+def voice_user_params() -> LLMUserAggregatorParams:
+    """Use finalized transcripts for reliable consecutive voice turns."""
+    return LLMUserAggregatorParams(
+        # Deepgram final transcripts drive turns directly. VAD could stay
+        # stuck in SPEAKING when speaker echo reached the microphone, causing
+        # the next finalized sentence to be discarded.
+        vad_analyzer=None,
+        user_turn_stop_timeout=0.9,
+        user_turn_strategies=UserTurnStrategies(
+            start=[TranscriptionUserTurnStartStrategy(use_interim=True)],
+            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)],
+        ),
+    )
 
 
 def origin_allowed(origin: str | None) -> bool:
@@ -292,7 +296,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         else configured_model
     )
     person_name = normalize_person_name(user_name)
-    intro = introduction_for(person_name)
+    intro_prompt = introduction_prompt_for(person_name)
     name_instruction = (
         f"The person's preferred name is {person_name}. Use their name naturally and sparingly. "
         if person_name
@@ -351,26 +355,12 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             model="eleven_flash_v2_5",
         ),
     )
-    context = LLMContext(messages=[{"role": "assistant", "content": intro}])
+    # The opening line goes through the same LLM and TTS pipeline as every
+    # later answer. It is an instruction, not prerecorded or fixed reply text.
+    context = LLMContext(messages=[{"role": "user", "content": intro_prompt}])
     user, assistant = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                confidence=0.5,
-                start_secs=0.1,
-                stop_secs=0.2,
-                min_volume=0.2,
-            )),
-            audio_idle_timeout=2.0,
-            user_turn_stop_timeout=0.9,
-            user_turn_strategies=UserTurnStrategies(
-                start=[
-                    VADUserTurnStartStrategy(),
-                    TranscriptionUserTurnStartStrategy(),
-                ],
-                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)],
-            ),
-        ),
+        user_params=voice_user_params(),
     )
     worker = PipelineWorker(
         Pipeline([
@@ -401,9 +391,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         # Let LiveKit finish publishing the bot audio track first.
         await asyncio.sleep(0.2)
         logger.info("Speaking Emma's intro.")
-        await worker.queue_frames([
-            TTSSpeakFrame(intro, append_to_context=False),
-        ])
+        await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_first_participant_joined")
     async def first_participant_joined(transport, participant_id):
