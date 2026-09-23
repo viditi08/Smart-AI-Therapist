@@ -374,30 +374,6 @@ a {
   font-size: 1rem;
 }
 
-.btn-google {
-  width: 100%;
-  gap: 0.65rem;
-  background: #fff;
-  color: #1f1f1f;
-  border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-
-.btn-google:hover {
-  filter: brightness(1.03);
-  border-color: rgba(0, 0, 0, 0.12);
-}
-
-.btn-google:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  filter: none;
-}
-
-.google-glyph {
-  flex-shrink: 0;
-}
-
 .user-chip {
   max-width: 10rem;
   overflow: hidden;
@@ -484,21 +460,6 @@ a {
   line-height: 1.45;
 }
 
-.auth-divider {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin: 1.1rem 0;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-.auth-divider::before,
-.auth-divider::after {
-  content: "";
-  height: 1px;
-  flex: 1;
-  background: var(--border);
-}
 .basic-auth-form { display: grid; gap: .8rem; }
 .basic-auth-form label { display: grid; gap: .3rem; font-size: .85rem; font-weight: 600; color: var(--text-muted); }
 .basic-auth-form input:not([type="hidden"]) { width: 100%; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-deep); color: var(--text); font: inherit; }

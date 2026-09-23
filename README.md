@@ -1,6 +1,6 @@
 # Emma — AI Therapist (landing + Pipecat voice)
 
-Conversational, therapy-style support with **Emma**: a **Pipecat** voice agent (**Deepgram** STT → **NVIDIA NIM** LLM → **ElevenLabs** TTS over WebRTC), plus a Next.js text pipeline, **Google or email sign-in**, and **saved conversations** in **PostgreSQL**.
+Conversational, therapy-style support with **Emma**: a **Pipecat** voice agent (**Deepgram** STT → **Groq** LLM → **ElevenLabs** TTS over LiveKit), plus a Next.js text pipeline, **username/password sign-in**, and **saved conversations** in **PostgreSQL**.
 
 **Repository:** [github.com/viditi08/Smart-AI-Therapist](https://github.com/viditi08/Smart-AI-Therapist)  
 **Live site:** [https://smart-ai-therapist.vercel.app](https://smart-ai-therapist.vercel.app)
@@ -14,7 +14,7 @@ Emma is **not** a substitute for emergency services, diagnosis, or care from a l
 **Voice (`/session/voice`)** is a Pipecat process (Python). The browser opens a WebRTC line to it:
 
 ```
-Mic  ──►  LiveKit  ──►  Pipecat (Deepgram → NVIDIA NIM → ElevenLabs)  ──►  Speaker
+Mic  ──►  LiveKit  ──►  Pipecat (Deepgram → Groq → ElevenLabs)  ──►  Speaker
                         voice-backend on port 7860
 ```
 
@@ -28,8 +28,8 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 
 - [Next.js](https://nextjs.org/) 15 (App Router)
 - [React](https://react.dev/) 19
-- [Auth.js / NextAuth](https://authjs.dev/) v5 — Google OAuth, JWT sessions, optional [Prisma](https://www.prisma.io/) adapter when `DATABASE_URL` is set
-- [Prisma](https://www.prisma.io/) + PostgreSQL — users (via adapter) + `ChatSession` transcripts
+- [Auth.js / NextAuth](https://authjs.dev/) v5 — username/password credentials and JWT sessions
+- [Prisma](https://www.prisma.io/) + PostgreSQL — users and saved session transcripts
 - [Pipecat](https://www.pipecat.ai/) — live voice (Python `voice-backend`)
 - [Deepgram](https://deepgram.com/) — speech-to-text
 - [NVIDIA NIM](https://build.nvidia.com/) — streaming LLM
@@ -42,8 +42,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 - **Python 3.11** — for the Pipecat voice backend
 - **Node.js** ≥ 18.18  
 - **PostgreSQL** — hosted (e.g. [Neon](https://neon.tech)) for production; locally optional via [Docker](https://www.docker.com/) (`docker-compose.yml` maps host port **5433**)
-- **Google Cloud** — OAuth 2.0 **Web** client (Client ID + secret)
-- **Provider keys** — `DEEPGRAM_API_KEY`, `NVIDIA_API_KEY`, `ELEVENLABS_API_KEY`
+- **Provider keys** — `NVIDIA_API_KEY` for text, plus `DEEPGRAM_API_KEY`, `GROQ_API_KEY`, `ELEVENLABS_API_KEY`, and LiveKit credentials for voice
 
 ---
 
@@ -61,7 +60,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
    cp .env.example .env.local
    ```
 
-   See [.env.example](./.env.example) for every variable and OAuth redirect notes.
+   See [.env.example](./.env.example) for every variable.
 
 3. **Database**
 
@@ -87,7 +86,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
    cp voice-backend/.env.example voice-backend/.env
    ```
 
-   Put the same Deepgram, NVIDIA, and ElevenLabs keys in `voice-backend/.env`. Then:
+   Put the Deepgram, Groq, ElevenLabs, and LiveKit credentials in `voice-backend/.env`. Then:
 
    ```bash
    npm run export:emma-prompt
@@ -119,23 +118,6 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 
 ---
 
-## Google OAuth
-
-In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → your **Web application** OAuth client:
-
-- **Authorized JavaScript origins** — e.g. `https://smart-ai-therapist.vercel.app`, `http://localhost:3000`
-- **Authorized redirect URIs** — must include **exactly**:
-
-  `https://smart-ai-therapist.vercel.app/api/auth/callback/google`
-
-  and for local dev:
-
-  `http://localhost:3000/api/auth/callback/google`
-
-Wrong path or trailing slash on the wrong segment causes **`redirect_uri_mismatch`**.
-
----
-
 ## Deploy (Vercel)
 
 Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildCommand`: `npm run build:production`).
@@ -147,8 +129,6 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
    |----------|-------------|
    | `DATABASE_URL` | Neon (or other) Postgres URL; include `sslmode=require` when required |
    | `AUTH_SECRET` | Strong random secret (e.g. `openssl rand -base64 32`) |
-   | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
-   | `AUTH_GOOGLE_SECRET` | Google OAuth Client secret |
    | `DEEPGRAM_API_KEY` | From [Deepgram Console](https://console.deepgram.com) |
    | `NVIDIA_API_KEY` | From [build.nvidia.com](https://build.nvidia.com) |
    | `ELEVENLABS_API_KEY` | From [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
@@ -162,7 +142,7 @@ Voice will not work on Vercel alone. Host `voice-backend/` on Render, Railway, F
 
 3. Run **Neon migrations** before or on first deploy (`npm run db:migrate:neon` locally against Neon, or rely on `build:production` if `DATABASE_URL` is set in Vercel).
 
-4. Align **Google OAuth** redirect URIs with the real Vercel host, then **Redeploy** after env changes.
+4. Redeploy after changing environment variables.
 
 ### Redeploy on Vercel
 
@@ -172,10 +152,10 @@ Voice will not work on Vercel alone. Host `voice-backend/` on Render, Railway, F
 
 ## Project layout (high level)
 
-- `voice-backend/` — Pipecat FastAPI server (Deepgram → NVIDIA → ElevenLabs)
+- `voice-backend/` — Pipecat FastAPI server (Deepgram → Groq → ElevenLabs)
 - `app/` — routes (marketing `/`, `/session/voice`, `/session/pipeline`, `/login`, dashboard `/account`)
 - `app/api/pipeline/` — text chat: `session`, `turn` (SSE), `summarize`
-- `auth.ts` / `auth.config.ts` — Auth.js + optional Prisma adapter
+- `auth.ts` / `auth.config.ts` — Auth.js username/password authentication
 - `components/session/` — Pipecat voice UI, text chat, onboarding
 - `prisma/` — schema + migrations
 - `lib/` — NVIDIA stream, crisis detection, Prisma/auth helpers
@@ -184,4 +164,4 @@ Voice will not work on Vercel alone. Host `voice-backend/` on Render, Railway, F
 
 ## License / privacy
 
-Treat API keys and `.env.local` as **secret**. Do not commit real credentials. Review the terms of Deepgram, NVIDIA, ElevenLabs, Google OAuth, and your host before production use.
+Treat API keys and `.env.local` as **secret**. Do not commit real credentials. Review the terms of Deepgram, Groq, ElevenLabs, LiveKit, and your host before production use.

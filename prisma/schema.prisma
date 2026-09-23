@@ -8,18 +8,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Auth.js — @auth/prisma-adapter (PostgreSQL / production-shaped)
+// Auth.js credentials users and saved conversations.
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime? @db.Timestamptz(3)
-  image         String?
-  passwordHash  String?
-  accounts      Account[]
-  sessions      Session[]
-  chatSessions       ChatSession[]
-  pipelineSessions   PipelineSession[]
+  id               String            @id @default(cuid())
+  username         String?           @unique
+  name             String?
+  email            String?           @unique
+  emailVerified    DateTime?         @db.Timestamptz(3)
+  image            String?
+  passwordHash     String?
+  accounts         Account[]
+  sessions         Session[]
+  chatSessions     ChatSession[]
+  pipelineSessions PipelineSession[]
 }
 
 model Account {
@@ -61,12 +62,12 @@ model VerificationToken {
 }
 
 model ChatSession {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String   @db.VarChar(512)
-  savedAt   DateTime @default(now()) @db.Timestamptz(3)
-  messages  Json /// JSONB in PostgreSQL
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title    String   @db.VarChar(512)
+  savedAt  DateTime @default(now()) @db.Timestamptz(3)
+  messages Json /// JSONB in PostgreSQL
 
   @@index([userId, savedAt])
 }

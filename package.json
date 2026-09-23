@@ -19,7 +19,6 @@
     "node": ">=18.18"
   },
   "dependencies": {
-    "@auth/prisma-adapter": "^2.11.2",
     "@pipecat-ai/client-js": "^1.13.1",
     "@pipecat-ai/livekit-transport": "^1.0.0",
     "@prisma/client": "^6.19.3",

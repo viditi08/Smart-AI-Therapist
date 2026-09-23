@@ -1,5 +1,4 @@
 import type { NextAuthConfig } from "next-auth";
-import Google from "next-auth/providers/google";
 import { resolveAuthSecret } from "@/lib/auth-secret";
 
 /**
@@ -7,12 +6,7 @@ import { resolveAuthSecret } from "@/lib/auth-secret";
  * never `@/auth`, so Prisma is not bundled into the Edge middleware.
  */
 export const authConfig = {
-  providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET,
-    }),
-  ],
+  providers: [],
   trustHost: true,
   pages: {
     signIn: "/login",

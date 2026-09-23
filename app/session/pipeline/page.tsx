@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { getSession } from "@/lib/session";
-import { GoogleGlyph } from "@/components/google-glyph";
 import { TextPipelineSession } from "@/components/session/text-pipeline-session";
 
 export const metadata = {
@@ -28,11 +27,10 @@ export default async function PipelineSessionPage() {
             Sign in to persist pipeline sessions to your account (optional in local dev).
           </p>
           <Link
-            className="btn btn-google session-auth-banner-btn"
+            className="btn btn-primary session-auth-banner-btn"
             href="/login?callbackUrl=/session/pipeline"
           >
-            <GoogleGlyph />
-            Continue with Google
+            Log in
           </Link>
         </div>
       ) : null}

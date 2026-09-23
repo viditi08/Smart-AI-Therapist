@@ -43,7 +43,7 @@ export default async function AccountPage() {
             {user.email ? (
               <p className="dashboard-profile-email text-muted">{user.email}</p>
             ) : null}
-            <p className="dashboard-profile-provider text-muted">Signed in with Google</p>
+            <p className="dashboard-profile-provider text-muted">Username and password account</p>
           </div>
         </div>
       </section>
