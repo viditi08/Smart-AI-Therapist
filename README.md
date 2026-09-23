@@ -133,7 +133,6 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
    | `NVIDIA_API_KEY` | From [build.nvidia.com](https://build.nvidia.com) |
    | `ELEVENLABS_API_KEY` | From [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
    | `ELEVENLABS_VOICE_ID` | Optional; defaults to `21m00Tcm4TlvDq8ikWAM` |
-   | `AUTH_URL` | `https://smart-ai-therapist.vercel.app` (no trailing slash) |
    | `AUTH_TRUST_HOST` | `true` |
    | `PIPECAT_BACKEND_URL` | Public HTTPS origin of the Python Pipecat server (not Vercel) |
    | `VOICE_BACKEND_SECRET` | Same random string as on the Python host |
