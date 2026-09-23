@@ -1,3 +1,5 @@
+import { auth } from "@/auth";
+
 export const runtime = "nodejs";
 
 function backendUrl(): string {
@@ -27,11 +29,14 @@ export async function POST(request: Request) {
     process.env.AUTH_URL?.replace(/\/$/, "") ||
     "http://localhost:3000";
   headers.Origin = origin;
+  const session = await auth();
+  const userName = session?.user?.name?.trim() || null;
 
   try {
     const response = await fetch(`${backend}/api/session`, {
       method: "POST",
       headers,
+      body: JSON.stringify({ user_name: userName }),
     });
     const body = (await response.json().catch(() => null)) as {
       detail?: string;

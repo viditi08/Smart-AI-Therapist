@@ -142,6 +142,12 @@ class VoiceServerTests(unittest.TestCase):
 
     def test_intro_and_probes_are_defined(self):
         self.assertIn("Emma", server.INTRO)
+        self.assertIn("what would you like me to call you", server.INTRO.lower())
+        self.assertEqual(
+            server.introduction_for("Maya Patel"),
+            "Hi Maya, I'm Emma. I'm here with you. What's on your mind?",
+        )
+        self.assertEqual(server.normalize_person_name("  Maya   Patel  "), "Maya Patel")
         mic = server.MicAudioProbe()
         self.assertTrue(callable(mic.process_frame))
         self.assertEqual(mic._chunks, 0)

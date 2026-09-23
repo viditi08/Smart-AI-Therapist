@@ -33,7 +33,7 @@ export default async function VoiceSessionPage() {
           )}
         </div>
       </header>
-      <PipecatSession />
+      <PipecatSession userName={session?.user?.name ?? null} />
     </div>
   );
 }

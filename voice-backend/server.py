@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from livekit import api as livekit_api
 from livekit import rtc as livekit_rtc
 from loguru import logger
+from pydantic import BaseModel
 
 # Pipecat opens LiveKit AudioStream at 48 kHz, then resamples to 16 kHz with
 # very-high-quality SOXR. On a laptop that starves playback and can feed
@@ -85,7 +86,7 @@ tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
 LEGACY_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 FAST_DIALOGUE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-INTRO = "Hi, I'm Emma. I'm here with you. What's on your mind?"
+INTRO = "Hi, I'm Emma. Before we begin, what would you like me to call you?"
 SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
 QUIET_MIC_CHUNKS = 750
@@ -198,6 +199,25 @@ def missing_settings():
     return [key for key in REQUIRED if not os.getenv(key, "").strip()]
 
 
+class SessionRequest(BaseModel):
+    user_name: str | None = None
+
+
+def normalize_person_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    name = " ".join(value.split()).strip()
+    return name[:60] or None
+
+
+def introduction_for(user_name: str | None) -> str:
+    name = normalize_person_name(user_name)
+    if not name:
+        return INTRO
+    first_name = name.split()[0]
+    return f"Hi {first_name}, I'm Emma. I'm here with you. What's on your mind?"
+
+
 def origin_allowed(origin: str | None) -> bool:
     if not origin:
         return False
@@ -237,23 +257,33 @@ def make_livekit_token(room_name: str, identity: str, name: str) -> str:
     )
 
 
-def create_worker(room_name: str, bot_token: str):
+def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     configured_model = os.environ["NVIDIA_MODEL"].strip()
     dialogue_model = (
         FAST_DIALOGUE_MODEL
         if configured_model == LEGACY_REASONING_MODEL
         else configured_model
     )
+    person_name = normalize_person_name(user_name)
+    intro = introduction_for(person_name)
+    name_instruction = (
+        f"The person's preferred name is {person_name}. Use their name naturally and sparingly. "
+        if person_name
+        else "Begin by asking what they would like to be called. Remember the name they give you and use it naturally and sparingly. "
+    )
     llm_settings = {
         "model": dialogue_model,
         "system_instruction": (ROOT / "emma-prompt.txt").read_text()
-        + "\nUse short spoken turns, without markdown or emojis.",
+        + "\nUse short spoken turns, without markdown or emojis. "
+        + name_instruction
+        + "Never address the person as 'user'.",
         "max_tokens": 160,
         "temperature": 1.0,
         "top_k": 1,
     }
-    # Nemotron reasoning models need this; Llama rejects it as an unknown argument.
-    if "nemotron" in dialogue_model and "reasoning" in dialogue_model:
+    # Nemotron supports hidden reasoning, but it adds avoidable latency to a
+    # live spoken turn. Other model families can reject this extra argument.
+    if "nemotron" in dialogue_model:
         llm_settings["extra"] = {"chat_template_kwargs": {"enable_thinking": False}}
     transport = LiveKitTransport(
         url=os.environ["LIVEKIT_URL"].strip(),
@@ -264,7 +294,7 @@ def create_worker(room_name: str, bot_token: str):
             audio_in_sample_rate=16000,
             audio_out_enabled=True,
             audio_out_sample_rate=24000,
-            audio_out_10ms_chunks=4,
+            audio_out_10ms_chunks=8,
         ),
     )
     logger.info("Voice dialogue model: {}", dialogue_model)
@@ -294,24 +324,24 @@ def create_worker(room_name: str, bot_token: str):
             model="eleven_flash_v2_5",
         ),
     )
-    context = LLMContext(messages=[{"role": "assistant", "content": INTRO}])
+    context = LLMContext(messages=[{"role": "assistant", "content": intro}])
     user, assistant = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(params=VADParams(
-                confidence=0.3,
+                confidence=0.5,
                 start_secs=0.1,
                 stop_secs=0.2,
-                min_volume=0.0,
+                min_volume=0.2,
             )),
             audio_idle_timeout=2.0,
-            user_turn_stop_timeout=1.2,
+            user_turn_stop_timeout=0.9,
             user_turn_strategies=UserTurnStrategies(
                 start=[
                     VADUserTurnStartStrategy(),
                     TranscriptionUserTurnStartStrategy(),
                 ],
-                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.3)],
+                stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)],
             ),
         ),
     )
@@ -344,7 +374,7 @@ def create_worker(room_name: str, bot_token: str):
         await asyncio.sleep(0.2)
         logger.info("Speaking Emma's intro.")
         await worker.queue_frames([
-            TTSSpeakFrame(INTRO, append_to_context=False),
+            TTSSpeakFrame(intro, append_to_context=False),
         ])
 
     @transport.event_handler("on_first_participant_joined")
@@ -381,10 +411,14 @@ def create_worker(room_name: str, bot_token: str):
     return run
 
 
-async def run_session_worker(room_name: str, bot_token: str):
+async def run_session_worker(
+    room_name: str,
+    bot_token: str,
+    user_name: str | None = None,
+):
     """Initialize providers outside the session-token request path."""
     try:
-        run = create_worker(room_name, bot_token)
+        run = create_worker(room_name, bot_token, user_name)
         await run()
     except asyncio.CancelledError:
         raise
@@ -443,7 +477,7 @@ async def root():
 
 
 @app.post("/api/session")
-async def create_session():
+async def create_session(payload: SessionRequest | None = None):
     if missing := missing_settings():
         raise HTTPException(503, "Configure voice-backend/.env: " + ", ".join(missing))
 
@@ -453,7 +487,8 @@ async def create_session():
         room_name = f"emma-{session_id}"
         user_token = make_livekit_token(room_name, f"user-{session_id}", "Emma user")
         bot_token = make_livekit_token(room_name, f"emma-{session_id}", "Emma")
-        task = asyncio.create_task(run_session_worker(room_name, bot_token))
+        user_name = normalize_person_name(payload.user_name if payload else None)
+        task = asyncio.create_task(run_session_worker(room_name, bot_token, user_name))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
 

@@ -14,9 +14,15 @@ import {
 
 type Stage = "idle" | "connecting" | "listening" | "speaking";
 
-const INTRO = "Hi, I'm Emma. I'm here with you. What's on your mind?";
+function introFor(userName: string | null) {
+  const firstName = userName?.trim().split(/\s+/)[0];
+  return firstName
+    ? `Hi ${firstName}, I'm Emma. I'm here with you. What's on your mind?`
+    : "Hi, I'm Emma. Before we begin, what would you like me to call you?";
+}
 
-export function PipecatSession() {
+export function PipecatSession({ userName }: { userName: string | null }) {
+  const intro = introFor(userName);
   const [stage, setStage] = useState<Stage>("idle");
   const [messages, setMessages] = useState<SavedChatMessage[]>([]);
   const [liveYou, setLiveYou] = useState("");
@@ -140,7 +146,7 @@ export function PipecatSession() {
             setMessages((previous) =>
               previous.some((message) => message.role === "emma")
                 ? previous
-                : [{ id: crypto.randomUUID(), role: "emma", text: INTRO }],
+                : [{ id: crypto.randomUUID(), role: "emma", text: intro }],
             );
           },
           onDeviceError: () => {
