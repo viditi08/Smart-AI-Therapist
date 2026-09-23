@@ -426,7 +426,11 @@ async def authorize_session_create(request: Request, call_next):
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     missing = missing_settings()
-    return {"ready": not missing, "missing": missing}
+    return {
+        "ready": not missing,
+        "missing": missing,
+        "active_sessions": sum(not task.done() for task in tasks),
+    }
 
 
 @app.api_route("/", methods=["GET", "HEAD"])

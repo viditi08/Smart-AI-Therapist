@@ -158,13 +158,30 @@ export function PipecatSession() {
               setError("Emma lost the connection. Tap Continue and speak again.");
             }
           },
-          onError: () => {
-            if (current()) {
-              stop();
-              setError(
-                "Emma could not start listening. Check the microphone, then try again.",
-              );
+          onError: (message) => {
+            if (!current()) return;
+            const data = message.data as
+              | { error?: unknown; message?: unknown; fatal?: boolean }
+              | undefined;
+            // Pipecat services can reconnect after non-fatal provider errors.
+            // Closing the whole room here turns a brief STT/TTS interruption
+            // into a failed session.
+            if (data?.fatal === false) {
+              console.warn("Recoverable voice service error", data.error ?? data.message);
+              return;
             }
+            const detail =
+              typeof data?.error === "string"
+                ? data.error
+                : typeof data?.message === "string"
+                  ? data.message
+                  : null;
+            stop();
+            setError(
+              detail
+                ? `Voice service error: ${detail.slice(0, 220)}`
+                : "Voice connection failed. Check the Render logs and try again.",
+            );
           },
           onTrackStarted: (track, participant) => {
             if (!current() || participant?.local || track.kind !== "audio") return;
