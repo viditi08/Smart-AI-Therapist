@@ -185,6 +185,21 @@ class ReplyLatencyProbe(FrameProcessor):
             self._turn_ended_at = None
         await self.push_frame(frame, direction)
 
+
+class TranscriptProbe(FrameProcessor):
+    """Confirm finalized speech reaches turn detection without logging its text."""
+
+    def __init__(self):
+        super().__init__()
+        self._count = 0
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame) and frame.text.strip():
+            self._count += 1
+            logger.info("Deepgram finalized transcript #{}.", self._count)
+        await self.push_frame(frame, direction)
+
 # Render's shared parent directory triggers this warning even though the app
 # only loads Pipecat's packaged local model data.
 warnings.filterwarnings(
@@ -362,6 +377,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             transport.input(),
             MicAudioProbe(),
             stt,
+            TranscriptProbe(),
             user,
             llm,
             tts,

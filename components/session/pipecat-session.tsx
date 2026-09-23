@@ -132,7 +132,7 @@ export function PipecatSession({ userName }: { userName: string | null }) {
             autoGainControl: true,
             channelCount: 1,
             echoCancellation: true,
-            noiseSuppression: false,
+            noiseSuppression: true,
           },
         }),
         enableMic: true,
@@ -163,6 +163,13 @@ export function PipecatSession({ userName }: { userName: string | null }) {
             if (!fromUser) {
               setError("Emma lost the connection. Tap Continue and speak again.");
             }
+          },
+          onBotDisconnected: () => {
+            if (!current()) return;
+            stop(false);
+            setError(
+              "Emma's voice session was replaced. Close other Emma tabs, then tap Continue.",
+            );
           },
           onError: (message) => {
             if (!current()) return;

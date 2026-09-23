@@ -162,6 +162,9 @@ class VoiceServerTests(unittest.TestCase):
         latency = server.ReplyLatencyProbe()
         self.assertTrue(callable(latency.process_frame))
         self.assertIsNone(latency._turn_ended_at)
+        transcript = server.TranscriptProbe()
+        self.assertTrue(callable(transcript.process_frame))
+        self.assertEqual(transcript._count, 0)
         self.assertTrue(issubclass(server.EmmaDeepgramSTTService, server.DeepgramSTTService))
 
     def test_tts_keeps_one_streaming_connection(self):
