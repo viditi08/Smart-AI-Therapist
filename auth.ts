@@ -17,13 +17,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const username = String(credentials?.username ?? "").trim().toLowerCase();
       const password = String(credentials?.password ?? "");
       if (!username || !password) return null;
-      const user = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { username },
-            // Keep existing email/password accounts usable after this change.
-            { email: username },
-          ],
+      // The existing unique email column is the credential identifier. It can
+      // hold either a username for new accounts or an email for legacy ones,
+      // so production does not depend on a separate username migration.
+      const user = await prisma.user.findUnique({
+        where: { email: username },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          passwordHash: true,
         },
       });
       if (!user?.passwordHash || !(await compare(password, user.passwordHash))) return null;

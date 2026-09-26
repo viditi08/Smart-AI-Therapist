@@ -40,9 +40,6 @@ export default async function AccountPage() {
           )}
           <div className="dashboard-profile-meta">
             {user.name ? <p className="dashboard-profile-name">{user.name}</p> : null}
-            {user.email ? (
-              <p className="dashboard-profile-email text-muted">{user.email}</p>
-            ) : null}
             <p className="dashboard-profile-provider text-muted">Username and password account</p>
           </div>
         </div>

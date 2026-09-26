@@ -19,7 +19,10 @@ export async function registerAccount(formData: FormData) {
   if (password !== String(formData.get("confirmPassword") ?? "")) redirect("/register?error=Passwords do not match.");
   try {
     await prisma.user.create({
-      data: { username, name: username, passwordHash: await hash(password, 12) },
+      // Reuse the database's existing unique credential identifier. The app
+      // treats this value as a username and never exposes it as an email.
+      data: { email: username, name: username, passwordHash: await hash(password, 12) },
+      select: { id: true },
     });
   } catch (error) {
     const code = databaseErrorCode(error);
@@ -27,7 +30,7 @@ export async function registerAccount(formData: FormData) {
       redirect("/register?error=That username is already taken. Try logging in or choose another username.");
     }
     if (code === "P2021" || code === "P2022") {
-      redirect("/register?error=The account database needs its latest migration. Redeploy the latest version and try again.");
+      redirect("/register?error=The account database schema is unavailable. Check the deployment database and try again.");
     }
     if (code === "P1001" || code === "P1002") {
       redirect("/register?error=The account database could not be reached. Try again in a moment.");
