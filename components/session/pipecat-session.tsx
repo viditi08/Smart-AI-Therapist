@@ -17,7 +17,6 @@ type Stage = "idle" | "connecting" | "listening" | "speaking";
 export function PipecatSession() {
   const [stage, setStage] = useState<Stage>("idle");
   const [messages, setMessages] = useState<SavedChatMessage[]>([]);
-  const [liveYou, setLiveYou] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const [sessionSummary, setSessionSummary] = useState<string | null>(null);
@@ -33,7 +32,6 @@ export function PipecatSession() {
   const live = stage === "listening" || stage === "speaking";
 
   messagesRef.current = messages;
-  const recent = messages.slice(-4);
 
   const release = useCallback(() => {
     startingRef.current = false;
@@ -55,7 +53,6 @@ export function PipecatSession() {
 
   const stop = useCallback((fromUser = true) => {
     userStoppedRef.current = fromUser;
-    setLiveYou("");
     release();
     setStage("idle");
   }, [release]);
@@ -83,7 +80,6 @@ export function PipecatSession() {
     setError(null);
     setSessionSummary(null);
     setCrisis(null);
-    setLiveYou("");
     setStage("connecting");
     const controller = new AbortController();
     abortRef.current = controller;
@@ -214,11 +210,8 @@ export function PipecatSession() {
             if (current()) setStage("listening");
           },
           onUserTranscript: (data) => {
-            if (!current() || !data.text.trim()) return;
-            setLiveYou(data.text);
-            if (!data.final) return;
+            if (!current() || !data.final || !data.text.trim()) return;
             append("user", data.text);
-            setLiveYou("");
             const detected = detectCrisis(data.text);
             if (detected.level === "none") return;
             setCrisis(detected.level);
@@ -319,50 +312,20 @@ export function PipecatSession() {
       </p>
       <p className="talk-hint">{hint}</p>
 
-      <div className="talk-quote">
-        <AnimatePresence mode="wait">
-          {error ? (
-            <motion.p
-              key="error"
-              className="talk-error"
-              role="alert"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              {error}
-            </motion.p>
-          ) : recent.length > 0 || liveYou ? (
-            <motion.div
-              key="transcript"
-              className="talk-transcript"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-            >
-              {recent.map((message) => (
-                <p
-                  key={message.id}
-                  className={`talk-line ${message.role === "user" ? "talk-line-you" : "talk-line-emma"}`}
-                >
-                  <span>{message.role === "user" ? "You" : "Emma"}</span>
-                  {message.text}
-                </p>
-              ))}
-              {liveYou ? (
-                <p className="talk-line talk-line-you talk-line-live">
-                  <span>You</span>
-                  {liveYou}
-                </p>
-              ) : null}
-            </motion.div>
-          ) : (
-            <p className="talk-line talk-line-empty">
-              A quiet space to say what's on your mind.
-            </p>
-          )}
-        </AnimatePresence>
-      </div>
+      <AnimatePresence>
+        {error ? (
+          <motion.p
+            key="error"
+            className="talk-error"
+            role="alert"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+          >
+            {error}
+          </motion.p>
+        ) : null}
+      </AnimatePresence>
 
       <motion.button
         type="button"
