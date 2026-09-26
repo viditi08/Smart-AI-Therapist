@@ -165,7 +165,9 @@ class VoiceServerTests(unittest.TestCase):
         guest_prompt = server.introduction_prompt_for(None)
         named_prompt = server.introduction_prompt_for("Maya Patel")
         self.assertIn("Emma", guest_prompt)
-        self.assertIn("what I would like you to call me", guest_prompt)
+        self.assertIn("what is on my mind", guest_prompt)
+        self.assertIn("Do not ask my name", guest_prompt)
+        self.assertNotIn("what I would like you to call me", guest_prompt)
         self.assertIn("Maya", named_prompt)
         self.assertIn("what is on their mind", named_prompt)
         self.assertEqual(server.normalize_person_name("  Maya   Patel  "), "Maya Patel")
@@ -197,6 +199,13 @@ class VoiceServerTests(unittest.TestCase):
     def test_consecutive_turns_are_driven_by_transcripts(self):
         params = server.voice_user_params()
         self.assertIsNone(params.vad_analyzer)
+        self.assertEqual(
+            params.user_turn_stop_timeout,
+            server.USER_TURN_STOP_TIMEOUT_SECS,
+        )
+        self.assertLess(server.DEEPGRAM_ENDPOINTING_MS, 200)
+        self.assertEqual(server.LIVEKIT_AUDIO_OUT_10MS_CHUNKS, 4)
+        self.assertLessEqual(server.VOICE_MAX_TOKENS, 100)
         self.assertEqual(len(params.user_turn_strategies.start), 1)
         self.assertIsInstance(
             params.user_turn_strategies.start[0],

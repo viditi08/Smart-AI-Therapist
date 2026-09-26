@@ -88,6 +88,10 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
 QUIET_MIC_CHUNKS = 750
+VOICE_MAX_TOKENS = 96
+USER_TURN_STOP_TIMEOUT_SECS = 0.55
+DEEPGRAM_ENDPOINTING_MS = 120
+LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 4
 
 
 class EmmaDeepgramSTTService(DeepgramSTTService):
@@ -226,7 +230,8 @@ def introduction_prompt_for(user_name: str | None) -> str:
     if not name:
         return (
             "Open this voice conversation with one warm, natural sentence. "
-            "Introduce yourself as Emma and ask what I would like you to call me."
+            "Introduce yourself as Emma and ask what is on my mind. "
+            "Do not ask my name or what you should call me."
         )
     first_name = name.split()[0]
     return (
@@ -261,7 +266,7 @@ def create_llm(system_instruction: str):
         settings = OpenAILLMService.Settings(
             model=model,
             system_instruction=system_instruction,
-            max_tokens=160,
+            max_tokens=VOICE_MAX_TOKENS,
             temperature=0.6,
             top_p=0.9,
             extra={
@@ -284,7 +289,7 @@ def create_llm(system_instruction: str):
     settings = {
         "model": model,
         "system_instruction": system_instruction,
-        "max_tokens": 160,
+        "max_tokens": VOICE_MAX_TOKENS,
         "temperature": 1.0,
         "top_k": 1,
     }
@@ -307,7 +312,7 @@ def voice_user_params() -> LLMUserAggregatorParams:
         # stuck in SPEAKING when speaker echo reached the microphone, causing
         # the next finalized sentence to be discarded.
         vad_analyzer=None,
-        user_turn_stop_timeout=0.9,
+        user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT_SECS,
         user_turn_strategies=UserTurnStrategies(
             start=[TranscriptionUserTurnStartStrategy(use_interim=True)],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)],
@@ -360,11 +365,13 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     name_instruction = (
         f"The person's preferred name is {person_name}. Use their name naturally and sparingly. "
         if person_name
-        else "Begin by asking what they would like to be called. Remember the name they give you and use it naturally and sparingly. "
+        else "Do not ask the person's name or what you should call them. "
     )
     system_instruction = (
         (ROOT / "emma-prompt.txt").read_text()
-        + "\nUse short spoken turns, without markdown or emojis. "
+        + "\nKeep every voice reply under 45 words and at most two short sentences. "
+        + "Start with a brief complete sentence so speech can begin promptly. "
+        + "Do not use markdown or emojis. "
         + name_instruction
         + "Never address the person as 'user'."
     )
@@ -378,7 +385,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             audio_in_sample_rate=16000,
             audio_out_enabled=True,
             audio_out_sample_rate=24000,
-            audio_out_10ms_chunks=8,
+            audio_out_10ms_chunks=LIVEKIT_AUDIO_OUT_10MS_CHUNKS,
         ),
     )
     logger.info("Voice dialogue provider/model: {}/{}", provider, dialogue_model)
@@ -389,7 +396,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             model="nova-3",
             language="en",
             interim_results=True,
-            endpointing=200,
+            endpointing=DEEPGRAM_ENDPOINTING_MS,
             punctuate=True,
             smart_format=True,
         ),
@@ -402,6 +409,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         settings=ElevenLabsTTSService.Settings(
             voice=os.environ["ELEVENLABS_VOICE_ID"].strip(),
             model="eleven_flash_v2_5",
+            speed=1.05,
         ),
     )
     # The opening line goes through the same LLM and TTS pipeline as every
