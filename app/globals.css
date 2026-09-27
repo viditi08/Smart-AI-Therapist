@@ -2083,21 +2083,37 @@ a {
   }
 }
 
-.talk-presence {
+.talk-duo {
   position: relative;
-  width: 240px;
-  height: 240px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  width: min(31rem, 100%);
+  min-height: 210px;
+  margin-bottom: 0.2rem;
 }
 
-.talk-halo {
+.talk-person {
+  position: relative;
+  display: flex;
+  width: 180px;
+  flex-direction: column;
+  align-items: center;
+  isolation: isolate;
+}
+
+.talk-person-halo {
   position: absolute;
-  inset: -28px;
+  top: -12px;
+  left: 7px;
+  width: 166px;
+  height: 166px;
+  pointer-events: none;
+  z-index: -1;
 }
 
-.talk-halo span {
+.talk-person-halo span {
   position: absolute;
   inset: 0;
   border-radius: 50%;
@@ -2105,25 +2121,19 @@ a {
   opacity: 0;
 }
 
-.talk-stage[data-live="true"] .talk-halo span,
-.talk-stage[data-stage="listening"] .talk-halo span,
-.talk-stage[data-stage="speaking"] .talk-halo span {
+.talk-person[data-active="true"] .talk-person-halo span {
   animation: talk-ring 2.8s ease-out infinite;
 }
 
-.talk-halo span:nth-child(2) {
-  animation-delay: 0.9s;
+.talk-person-halo span:nth-child(2) {
+  animation-delay: 1.2s;
 }
 
-.talk-halo span:nth-child(3) {
-  animation-delay: 1.8s;
-}
-
-.talk-stage[data-stage="speaking"] .talk-halo span {
+.talk-person-emma[data-active="true"] .talk-person-halo span {
   border-color: rgba(74, 143, 212, 0.5);
 }
 
-.talk-stage[data-stage="listening"] .talk-halo span {
+.talk-person-you[data-active="true"] .talk-person-halo span {
   border-color: rgba(46, 155, 106, 0.45);
 }
 
@@ -2138,42 +2148,71 @@ a {
   }
 }
 
-.talk-avatar {
+.talk-person-avatar {
   position: relative;
   z-index: 1;
-  width: 196px;
-  height: 196px;
+  width: 142px;
+  height: 142px;
   border-radius: 50%;
   overflow: hidden;
+  background: rgba(255, 255, 255, 0.82);
   box-shadow:
-    0 0 0 6px rgba(255, 255, 255, 0.75),
-    0 22px 50px rgba(45, 111, 173, 0.28);
+    0 0 0 5px rgba(255, 255, 255, 0.8),
+    0 18px 40px rgba(45, 111, 173, 0.2);
+  transition:
+    box-shadow 0.3s ease,
+    transform 0.3s ease;
 }
 
-.talk-avatar img {
+.talk-person[data-active="true"] .talk-person-avatar {
+  transform: translateY(-3px) scale(1.035);
+}
+
+.talk-person-emma[data-active="true"] .talk-person-avatar {
+  box-shadow:
+    0 0 0 5px rgba(255, 255, 255, 0.9),
+    0 0 0 10px rgba(74, 143, 212, 0.16),
+    0 20px 46px rgba(45, 111, 173, 0.28);
+}
+
+.talk-person-you[data-active="true"] .talk-person-avatar {
+  box-shadow:
+    0 0 0 5px rgba(255, 255, 255, 0.9),
+    0 0 0 10px rgba(46, 155, 106, 0.14),
+    0 20px 46px rgba(35, 125, 86, 0.2);
+}
+
+.talk-person-avatar img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.talk-stage[data-stage="thinking"] .talk-avatar,
-.talk-stage[data-stage="stt"] .talk-avatar {
-  animation: talk-breathe 2.4s ease-in-out infinite;
+.talk-person-avatar-user {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #78b8e8, #357dbd 56%, #2767a0);
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 3.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
-@keyframes talk-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.035);
-  }
+.talk-person-name {
+  margin-top: 1rem;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.talk-waves {
+.talk-person-waves {
   position: absolute;
-  bottom: -18px;
+  top: 126px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2181,18 +2220,15 @@ a {
   gap: 5px;
   height: 22px;
   z-index: 2;
-}
-
-.talk-waves {
   opacity: 0;
   transition: opacity 0.3s ease;
 }
 
-.talk-stage[data-live="true"] .talk-waves {
+.talk-person[data-active="true"] .talk-person-waves {
   opacity: 1;
 }
 
-.talk-waves span {
+.talk-person-waves span {
   width: 4px;
   height: 6px;
   border-radius: 99px;
@@ -2200,22 +2236,70 @@ a {
   opacity: 0.35;
 }
 
-.talk-stage[data-stage="listening"] .talk-waves span,
-.talk-stage[data-stage="speaking"] .talk-waves span {
+.talk-person[data-active="true"] .talk-person-waves span {
   opacity: 1;
   animation: talk-bar 0.9s ease-in-out infinite;
 }
 
-.talk-stage[data-stage="listening"] .talk-waves span {
+.talk-person-you .talk-person-waves span {
   background: var(--accent-live);
 }
 
-.talk-waves span:nth-child(odd) {
+.talk-person-waves span:nth-child(odd) {
   animation-duration: 0.7s;
 }
 
-.talk-waves span:nth-child(3n) {
+.talk-person-waves span:nth-child(3n) {
   animation-duration: 1.1s;
+}
+
+.talk-duo-connection {
+  position: relative;
+  display: flex;
+  width: 58px;
+  align-items: center;
+  justify-content: center;
+}
+
+.talk-duo-connection::before {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(74, 143, 212, 0.12), rgba(74, 143, 212, 0.48), rgba(46, 155, 106, 0.12));
+  content: "";
+}
+
+.talk-duo-connection span {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(74, 143, 212, 0.5);
+}
+
+.talk-duo-connection span:first-child {
+  left: 0;
+}
+
+.talk-duo-connection span:last-child {
+  right: 0;
+  background: rgba(46, 155, 106, 0.5);
+}
+
+.talk-duo-connection i {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  background: var(--text-muted);
+  box-shadow: 0 0 0 1px rgba(74, 143, 212, 0.2);
+  transition: background 0.3s ease;
+}
+
+.talk-stage[data-live="true"] .talk-duo-connection i {
+  background: var(--accent-live);
 }
 
 @keyframes talk-bar {
@@ -2377,14 +2461,46 @@ a {
     display: none;
   }
 
-  .talk-presence {
-    width: 200px;
-    height: 200px;
+  .talk-stage {
+    justify-content: flex-start;
+    padding-top: 2.5rem;
   }
 
-  .talk-avatar {
-    width: 164px;
-    height: 164px;
+  .talk-duo {
+    gap: 0.35rem;
+    min-height: 170px;
+  }
+
+  .talk-person {
+    width: 132px;
+  }
+
+  .talk-person-avatar {
+    width: 112px;
+    height: 112px;
+  }
+
+  .talk-person-halo {
+    top: -8px;
+    left: 6px;
+    width: 120px;
+    height: 120px;
+  }
+
+  .talk-person-avatar-user {
+    font-size: 3rem;
+  }
+
+  .talk-person-waves {
+    top: 96px;
+  }
+
+  .talk-duo-connection {
+    width: 34px;
+  }
+
+  .talk-person-name {
+    margin-top: 0.8rem;
   }
 }
 

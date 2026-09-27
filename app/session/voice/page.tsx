@@ -10,6 +10,8 @@ export const metadata = {
 export default async function VoiceSessionPage() {
   const session = await getSession();
   const signedIn = Boolean(session?.user);
+  const userName = session?.user?.name?.trim() || "You";
+  const userImage = session?.user?.image?.trim() || null;
 
   return (
     <div className="talk-room">
@@ -33,7 +35,7 @@ export default async function VoiceSessionPage() {
           )}
         </div>
       </header>
-      <PipecatSession />
+      <PipecatSession userName={userName} userImage={userImage} />
     </div>
   );
 }

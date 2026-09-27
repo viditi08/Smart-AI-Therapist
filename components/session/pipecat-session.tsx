@@ -14,7 +14,12 @@ import {
 
 type Stage = "idle" | "connecting" | "listening" | "speaking";
 
-export function PipecatSession() {
+type PipecatSessionProps = {
+  userName: string;
+  userImage?: string | null;
+};
+
+export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
   const [stage, setStage] = useState<Stage>("idle");
   const [messages, setMessages] = useState<SavedChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +35,8 @@ export function PipecatSession() {
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const live = stage === "listening" || stage === "speaking";
+  const displayName = userName === "You" ? "You" : userName.split(/\s+/)[0];
+  const userInitial = displayName.charAt(0).toUpperCase() || "Y";
 
   messagesRef.current = messages;
 
@@ -287,25 +294,60 @@ export function PipecatSession() {
         <span className="talk-blob talk-blob-c" />
       </div>
 
-      <div className="talk-presence">
-        <div className="talk-halo" aria-hidden>
+      <div className="talk-duo" aria-label={`Voice session between Emma and ${displayName}`}>
+        <div
+          className="talk-person talk-person-emma"
+          data-active={stage === "speaking" ? "true" : "false"}
+        >
+          <div className="talk-person-halo" aria-hidden>
+            <span />
+            <span />
+          </div>
+          <div className="talk-person-avatar">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/emma-avatar.png" alt="Emma" width={180} height={180} />
+          </div>
+          <div className="talk-person-waves" aria-hidden>
+            {Array.from({ length: 5 }, (_, i) => (
+              <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />
+            ))}
+          </div>
+          <span className="talk-person-name">Emma</span>
+        </div>
+
+        <div className="talk-duo-connection" aria-hidden>
           <span />
-          <span />
+          <i />
           <span />
         </div>
-        <div className="talk-avatar">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/emma-avatar.png" alt="" width={220} height={220} />
-        </div>
-        <div className="talk-waves" aria-hidden>
-          {Array.from({ length: 7 }, (_, i) => (
-            <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />
-          ))}
+
+        <div
+          className="talk-person talk-person-you"
+          data-active={stage === "listening" ? "true" : "false"}
+        >
+          <div className="talk-person-halo" aria-hidden>
+            <span />
+            <span />
+          </div>
+          <div className="talk-person-avatar talk-person-avatar-user">
+            {userImage ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={userImage} alt={displayName} width={180} height={180} />
+            ) : (
+              <span aria-hidden>{userInitial}</span>
+            )}
+          </div>
+          <div className="talk-person-waves" aria-hidden>
+            {Array.from({ length: 5 }, (_, i) => (
+              <span key={i} style={{ animationDelay: `${i * 0.08}s` }} />
+            ))}
+          </div>
+          <span className="talk-person-name">{displayName}</span>
         </div>
       </div>
 
       <p className="talk-kicker">In session</p>
-      <h1 className="talk-name">Emma</h1>
+      <h1 className="talk-name">You &amp; Emma</h1>
       <p className="talk-status" aria-live="polite">
         <span className="talk-status-dot" />
         {status}
