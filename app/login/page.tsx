@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { isDatabaseUrlConfigured } from "@/lib/database-env";
-import { loginWithCredentials } from "./actions";
 
 type Props = {
   searchParams: Promise<{ callbackUrl?: string; error?: string; created?: string }>;
@@ -45,7 +44,7 @@ export default async function LoginPage({ searchParams }: Props) {
             Account created. You can log in now.
           </p>
         ) : null}
-        <form action={loginWithCredentials} className="basic-auth-form">
+        <form action="/api/account/login" method="post" className="basic-auth-form">
           <label>
             Username
             <input name="username" autoComplete="username" required />
