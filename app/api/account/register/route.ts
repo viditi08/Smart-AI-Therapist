@@ -35,8 +35,18 @@ export async function POST(request: Request) {
   }
 
   const username = String(formData.get("username") ?? "").trim().toLowerCase();
+  const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
   const password = String(formData.get("password") ?? "");
   const confirmation = String(formData.get("confirmPassword") ?? "");
+  const isAdult = String(formData.get("isAdult") ?? "");
+
+  if (name.length < 2 || name.length > 80) {
+    return registrationError(
+      request,
+      "Enter the name you would like Emma to call you.",
+      redirectTo,
+    );
+  }
 
   if (!/^[a-z0-9_.-]{3,32}$/.test(username) || password.length < 8) {
     return registrationError(
@@ -50,11 +60,27 @@ export async function POST(request: Request) {
     return registrationError(request, "Passwords do not match.", redirectTo);
   }
 
+  if (isAdult !== "yes" && isAdult !== "no") {
+    return registrationError(
+      request,
+      "Choose Yes or No for the 18+ age question.",
+      redirectTo,
+    );
+  }
+
+  if (isAdult === "no") {
+    return registrationError(
+      request,
+      "Emma is currently available only to people who are 18 or older.",
+      redirectTo,
+    );
+  }
+
   try {
     await prisma.user.create({
       data: {
         email: username,
-        name: username,
+        name,
         passwordHash: await hash(password, 12),
       },
       select: { id: true },

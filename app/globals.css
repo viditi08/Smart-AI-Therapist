@@ -462,7 +462,13 @@ a {
 
 .basic-auth-form { display: grid; gap: .8rem; }
 .basic-auth-form label { display: grid; gap: .3rem; font-size: .85rem; font-weight: 600; color: var(--text-muted); }
-.basic-auth-form input:not([type="hidden"]) { width: 100%; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-deep); color: var(--text); font: inherit; }
+.basic-auth-form input:not([type="hidden"]):not([type="radio"]) { width: 100%; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-deep); color: var(--text); font: inherit; }
+.auth-age-check { margin: .1rem 0 0; padding: .8rem; border: 1px solid var(--border); border-radius: 12px; }
+.auth-age-check legend { padding: 0 .35rem; font-size: .85rem; font-weight: 700; color: var(--text); }
+.auth-age-options { display: grid; grid-template-columns: 1fr 1fr; gap: .65rem; }
+.basic-auth-form .auth-age-option { display: flex; align-items: center; justify-content: center; gap: .45rem; padding: .65rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-deep); cursor: pointer; }
+.basic-auth-form .auth-age-option:has(input:checked) { color: var(--accent-deep); border-color: rgba(74, 143, 212, .55); background: var(--accent-soft); }
+.auth-age-option input { accent-color: var(--accent-deep); }
 .auth-register-link { margin: .8rem 0; text-align: center; font-size: .85rem; color: var(--text-muted); }
 .auth-register-link a { color: var(--accent); font-weight: 700; }
 
