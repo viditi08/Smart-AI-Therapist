@@ -30,7 +30,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         },
       });
       if (!user?.passwordHash || !(await compare(password, user.passwordHash))) return null;
-      return { id: user.id, email: user.email, name: user.name };
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name?.trim() || user.email,
+      };
     },
   })],
   session: { strategy: "jwt" },
@@ -39,6 +43,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       if (session.user && token.sub) {
         session.user.id = token.sub;
+        session.user.name =
+          session.user.name?.trim() ||
+          (typeof token.name === "string" ? token.name.trim() : "") ||
+          (typeof token.email === "string" ? token.email.trim() : "") ||
+          null;
       }
       return session;
     },

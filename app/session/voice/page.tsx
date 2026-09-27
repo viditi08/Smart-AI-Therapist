@@ -10,7 +10,8 @@ export const metadata = {
 export default async function VoiceSessionPage() {
   const session = await getSession();
   const signedIn = Boolean(session?.user);
-  const userName = session?.user?.name?.trim() || "You";
+  const userName =
+    session?.user?.name?.trim() || session?.user?.email?.trim() || "You";
   const userImage = session?.user?.image?.trim() || null;
 
   return (
