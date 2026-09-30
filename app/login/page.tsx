@@ -19,7 +19,7 @@ export default async function LoginPage({ searchParams }: Props) {
   const dbReady = isDatabaseUrlConfigured();
   const basicError =
     sp.error === "InvalidCredentials"
-      ? "Username or password is incorrect."
+      ? "Username, email, or password is incorrect."
       : sp.error === "DatabaseRequired"
         ? "Login needs PostgreSQL. Configure DATABASE_URL first."
         : null;
@@ -46,8 +46,13 @@ export default async function LoginPage({ searchParams }: Props) {
         ) : null}
         <form action="/api/account/login" method="post" className="basic-auth-form">
           <label>
-            Username
-            <input name="username" autoComplete="username" required />
+            Username or email
+            <input
+              name="identifier"
+              autoComplete="username"
+              placeholder="you@example.com or username"
+              required
+            />
           </label>
           <label>
             Password

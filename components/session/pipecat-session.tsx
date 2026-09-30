@@ -275,12 +275,12 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
     stage === "connecting"
       ? "Opening a live line with Emma…"
       : stage === "listening"
-        ? "Just talk. You can interrupt her anytime."
+        ? "Just talk — I’m listening."
         : stage === "speaking"
-          ? "I'm here with you."
+          ? "I’m here with you."
           : messages.length > 0
             ? "Tap to pick up where you left off"
-            : "Tap the button. Then just talk — I'll wait, and you can interrupt me.";
+            : "Tap the button. Then just talk — I’ll listen and keep up naturally.";
 
   return (
     <div

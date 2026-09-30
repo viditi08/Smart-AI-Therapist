@@ -17,7 +17,7 @@ export default async function RegisterPage({ searchParams }: Props) {
         </Link>
         <h1 className="auth-title">Create your account</h1>
         <p className="auth-lead">
-          Tell Emma what to call you, then choose a username and password.
+          Tell Emma what to call you, choose a username, and add your email.
         </p>
         {error ? (
           <p className="auth-alert auth-alert-error" role="alert">
@@ -47,6 +47,15 @@ export default async function RegisterPage({ searchParams }: Props) {
               minLength={3}
               maxLength={32}
               pattern="[A-Za-z0-9_.-]+"
+              required
+            />
+          </label>
+          <label>
+            Email
+            <input
+              name="email"
+              type="email"
+              autoComplete="email"
               required
             />
           </label>

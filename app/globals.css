@@ -2107,6 +2107,11 @@ a {
   flex-direction: column;
   align-items: center;
   isolation: isolate;
+  transition: transform 0.28s ease;
+}
+
+.talk-person[data-active="true"] {
+  transform: translateY(-4px);
 }
 
 .talk-person-halo {
@@ -2220,18 +2225,19 @@ a {
   position: absolute;
   top: 126px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(0.96);
   display: flex;
   align-items: flex-end;
   gap: 5px;
   height: 22px;
   z-index: 2;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 
 .talk-person[data-active="true"] .talk-person-waves {
   opacity: 1;
+  transform: translateX(-50%) scale(1);
 }
 
 .talk-person-waves span {
@@ -2301,11 +2307,13 @@ a {
   border-radius: 50%;
   background: var(--text-muted);
   box-shadow: 0 0 0 1px rgba(74, 143, 212, 0.2);
-  transition: background 0.3s ease;
+  transition: background 0.3s ease, transform 0.28s ease, box-shadow 0.28s ease;
 }
 
 .talk-stage[data-live="true"] .talk-duo-connection i {
   background: var(--accent-live);
+  transform: scale(1.08);
+  box-shadow: 0 0 0 4px rgba(46, 155, 106, 0.14);
 }
 
 @keyframes talk-bar {

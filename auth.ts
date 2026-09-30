@@ -10,21 +10,24 @@ const usePrismaAdapter = isDatabaseUrlConfigured();
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   providers: [Credentials({
-    name: "Username and password",
-    credentials: { username: {}, password: {} },
+    name: "Username or email and password",
+    credentials: { username: {}, email: {}, identifier: {}, password: {} },
     async authorize(credentials) {
       if (!usePrismaAdapter) return null;
-      const username = String(credentials?.username ?? "").trim().toLowerCase();
+      const identifier = String(
+        credentials?.identifier ?? credentials?.username ?? credentials?.email ?? "",
+      ).trim().toLowerCase();
       const password = String(credentials?.password ?? "");
-      if (!username || !password) return null;
-      // The existing unique email column is the credential identifier. It can
-      // hold either a username for new accounts or an email for legacy ones,
-      // so production does not depend on a separate username migration.
-      const user = await prisma.user.findUnique({
-        where: { email: username },
+      if (!identifier || !password) return null;
+
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [{ email: identifier }, { username: identifier }],
+        },
         select: {
           id: true,
           email: true,
+          username: true,
           name: true,
           passwordHash: true,
         },
@@ -32,8 +35,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (!user?.passwordHash || !(await compare(password, user.passwordHash))) return null;
       return {
         id: user.id,
-        email: user.email,
-        name: user.name?.trim() || user.email,
+        email: user.email ?? user.username ?? null,
+        name: user.name?.trim() || user.email || user.username || "User",
       };
     },
   })],

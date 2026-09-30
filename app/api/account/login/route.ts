@@ -26,8 +26,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    const identifier = String(
+      formData.get("identifier") ?? formData.get("username") ?? formData.get("email") ?? "",
+    ).trim();
+
     const result = await signIn("credentials", {
-      username: String(formData.get("username") ?? ""),
+      identifier,
+      username: identifier,
+      email: identifier,
       password: String(formData.get("password") ?? ""),
       redirect: false,
       redirectTo,

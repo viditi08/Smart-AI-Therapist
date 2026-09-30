@@ -35,6 +35,7 @@ export async function POST(request: Request) {
   }
 
   const username = String(formData.get("username") ?? "").trim().toLowerCase();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const name = String(formData.get("name") ?? "").trim().replace(/\s+/g, " ");
   const password = String(formData.get("password") ?? "");
   const confirmation = String(formData.get("confirmPassword") ?? "");
@@ -48,12 +49,20 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!/^[a-z0-9_.-]{3,32}$/.test(username) || password.length < 8) {
+  if (!/^[a-z0-9_.-]{3,32}$/.test(username)) {
     return registrationError(
       request,
-      "Use a 3–32 character username and an 8+ character password.",
+      "Use a 3–32 character username with letters, numbers, periods, underscores, or dashes.",
       redirectTo,
     );
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return registrationError(request, "Enter a valid email address.", redirectTo);
+  }
+
+  if (password.length < 8) {
+    return registrationError(request, "Use an 8+ character password.", redirectTo);
   }
 
   if (password !== confirmation) {
@@ -77,9 +86,28 @@ export async function POST(request: Request) {
   }
 
   try {
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ username }, { email }],
+      },
+      select: { username: true, email: true },
+    });
+
+    if (existingUser) {
+      const conflict = existingUser.username === username ? "username" : "email";
+      return registrationError(
+        request,
+        conflict === "username"
+          ? "That username is already taken. Try another one."
+          : "That email is already registered. Use another email or log in.",
+        redirectTo,
+      );
+    }
+
     await prisma.user.create({
       data: {
-        email: username,
+        username,
+        email,
         name,
         passwordHash: await hash(password, 12),
       },
