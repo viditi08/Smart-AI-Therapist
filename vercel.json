@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build:production"
+  "buildCommand": "npm run build:production",
+  "crons": [
+    {
+      "path": "/api/voice/wake",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

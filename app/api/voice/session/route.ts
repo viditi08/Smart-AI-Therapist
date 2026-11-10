@@ -1,26 +1,17 @@
 import { auth } from "@/auth";
+import { isLocalVoiceBackend, voiceBackendUrl } from "@/lib/voice-backend";
 
 export const runtime = "nodejs";
 
-function backendUrl(): string {
-  const configured = (process.env.PIPECAT_BACKEND_URL || "")
-    .trim()
-    .replace(/^[=]+/, "")
-    .replace(/^["']|["']$/g, "")
-    .replace(/\/$/, "");
-  if (configured) return configured;
-  if (process.env.NODE_ENV === "production") {
-    return "https://smart-ai-therapist.onrender.com";
-  }
-  return "http://127.0.0.1:7860";
-}
-
-function isLocalBackend(url: string): boolean {
-  return url.includes("127.0.0.1") || url.includes("localhost");
-}
-
 export async function POST(request: Request) {
-  const backend = backendUrl();
+  const backend = voiceBackendUrl();
+  let allowBargeIn = false;
+  try {
+    const incoming = (await request.clone().json()) as { allow_barge_in?: unknown };
+    allowBargeIn = incoming.allow_barge_in === true;
+  } catch {
+    allowBargeIn = false;
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -40,7 +31,7 @@ export async function POST(request: Request) {
     const response = await fetch(`${backend}/api/session`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ user_name: userName }),
+      body: JSON.stringify({ user_name: userName, allow_barge_in: allowBargeIn }),
     });
     const body = (await response.json().catch(() => null)) as {
       detail?: unknown;
@@ -73,7 +64,7 @@ export async function POST(request: Request) {
   } catch {
     return Response.json(
       {
-        detail: isLocalBackend(backend)
+        detail: isLocalVoiceBackend(backend)
           ? "Start the local voice backend on port 7860, then try again."
           : `Cannot reach the voice server at ${backend}. Start that host and check /health.`,
       },

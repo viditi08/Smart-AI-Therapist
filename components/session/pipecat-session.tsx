@@ -26,6 +26,7 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
   const [ending, setEnding] = useState(false);
   const [sessionSummary, setSessionSummary] = useState<string | null>(null);
   const [crisis, setCrisis] = useState<Exclude<CrisisLevel, "none"> | null>(null);
+  const [headphones, setHeadphones] = useState(false);
   const clientRef = useRef<PipecatClient | null>(null);
   const messagesRef = useRef<SavedChatMessage[]>([]);
   const startingRef = useRef(false);
@@ -60,6 +61,11 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
   }, []);
 
   useEffect(() => release, [release]);
+
+  useEffect(() => {
+    void fetch("/api/voice/wake").catch(() => {});
+    setHeadphones(window.localStorage.getItem("emma-headphones") === "1");
+  }, []);
 
   const stop = useCallback((fromUser = true) => {
     userStoppedRef.current = fromUser;
@@ -106,10 +112,12 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
         import("@pipecat-ai/client-js"),
         import("@pipecat-ai/livekit-transport"),
       ]);
+      const useHeadphones = headphones;
       const sessionResponse = await fetch("/api/voice/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
+        body: JSON.stringify({ allow_barge_in: useHeadphones }),
       });
       if (!sessionResponse.ok) {
         const detail = (await sessionResponse.json().catch(() => null)) as
@@ -125,7 +133,7 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
       if (!current()) return;
       const client = new PipecatClient({
         transport: new LiveKitTransport({
-          webAudioMix: false,
+          webAudioMix: true,
           audioCaptureDefaults: {
             channelCount: 1,
             echoCancellation: true,
@@ -192,21 +200,7 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
           },
             onTrackStarted: (track, participant) => {
             if (!current() || participant?.local || track.kind !== "audio") return;
-            const audio = audioRef.current;
-            if (!audio) return;
-            const currentStream =
-              audio.srcObject instanceof MediaStream
-                ? audio.srcObject
-                : new MediaStream();
-            if (!currentStream.getAudioTracks().some((existing) => existing.id === track.id)) {
-              currentStream.addTrack(track);
-            }
-            if (audio.srcObject !== currentStream) {
-              audio.srcObject = currentStream;
-            }
-            audio.muted = false;
-            audio.volume = 1;
-            void audio.play().catch(() => {
+            void audioRef.current?.play().catch(() => {
               if (current()) {
                 setError("Click the page once so your browser can play Emma’s voice.");
               }
@@ -217,7 +211,9 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
             setStage("speaking");
             if (micHangoverRef.current) clearTimeout(micHangoverRef.current);
             micHangoverRef.current = null;
-            void clientRef.current?.enableMic(false);
+            if (!useHeadphones) {
+              void clientRef.current?.enableMic(false);
+            }
             void audioRef.current?.play().catch(() => {});
           },
           onBotStoppedSpeaking: () => {
@@ -228,7 +224,7 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
               micHangoverRef.current = null;
               if (!current() || !clientRef.current) return;
               void clientRef.current.enableMic(true);
-            }, 1200);
+            }, useHeadphones ? 200 : 1200);
           },
           onUserStartedSpeaking: () => {
             if (current()) setStage("listening");
@@ -292,9 +288,13 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
     stage === "connecting"
       ? "Opening a live line with Emma…"
       : stage === "listening"
-        ? "Just talk — I’m listening."
+        ? headphones
+          ? "Just talk — you can come in while I’m speaking."
+          : "Wait until I finish, then talk."
         : stage === "speaking"
-          ? "I’m here with you."
+          ? headphones
+            ? "I’m here with you."
+            : "I’ll listen when this line is done."
           : messages.length > 0
             ? "Tap to pick up where you left off"
             : "Tap the button. Then just talk — I’ll listen and keep up naturally.";
@@ -370,6 +370,20 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
         {status}
       </p>
       <p className="talk-hint">{hint}</p>
+      <div className="talk-mode">
+        <button
+          type="button"
+          aria-pressed={headphones}
+          disabled={live || stage === "connecting"}
+          onClick={() => {
+            const next = !headphones;
+            setHeadphones(next);
+            window.localStorage.setItem("emma-headphones", next ? "1" : "0");
+          }}
+        >
+          {headphones ? "Headphones — you can interrupt" : "Speakers — wait your turn"}
+        </button>
+      </div>
 
       <AnimatePresence>
         {error ? (

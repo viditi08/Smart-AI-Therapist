@@ -132,6 +132,7 @@ class VoiceServerTests(unittest.TestCase):
         self.assertTrue(body["room_name"].startswith("emma-"))
         self.assertGreater(len(body["token"]), 20)
         create_worker.assert_called_once()
+        self.assertFalse(create_worker.call_args.kwargs.get("allow_barge_in", False))
 
     def test_health_and_root_accept_head(self):
         self.assertEqual(self.client.head("/health").status_code, 200)
@@ -151,6 +152,23 @@ class VoiceServerTests(unittest.TestCase):
                 headers={"Origin": "https://smart-ai-therapist.vercel.app"},
             )
         self.assertEqual(response.status_code, 200)
+
+    def test_session_can_enable_headphone_barge_in(self):
+        async def idle_worker():
+            await asyncio.sleep(0)
+
+        settings = {key: "test-placeholder" for key in server.REQUIRED}
+        settings["LIVEKIT_URL"] = "wss://example.livekit.cloud"
+        with patch.dict(os.environ, settings), patch.object(
+            server, "create_worker", return_value=idle_worker
+        ) as create_worker:
+            response = self.client.post(
+                "/api/session",
+                headers=self.origin,
+                json={"allow_barge_in": True},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(create_worker.call_args.kwargs.get("allow_barge_in"))
 
     def test_secret_allows_server_proxy_without_origin(self):
         async def idle_worker():
@@ -221,9 +239,10 @@ class VoiceServerTests(unittest.TestCase):
         mic = server.MicAudioProbe()
         self.assertTrue(callable(mic.process_frame))
         self.assertEqual(mic._chunks, 0)
-        latency = server.ReplyLatencyProbe()
+        clock = server.TurnLatencyTracker()
+        latency = server.ReplyLatencyProbe(clock)
         self.assertTrue(callable(latency.process_frame))
-        self.assertIsNone(latency._turn_ended_at)
+        self.assertIsNone(clock.user_stop)
         transcript = server.TranscriptProbe()
         self.assertTrue(callable(transcript.process_frame))
         self.assertEqual(transcript._count, 0)
@@ -291,6 +310,13 @@ class VoiceServerTests(unittest.TestCase):
         self.assertFalse(params.user_turn_strategies.start[0]._enable_interruptions)
         self.assertFalse(params.user_turn_strategies.start[1]._enable_interruptions)
         self.assertGreaterEqual(server.ECHO_HANGOVER_SECS, 1.0)
+        headphones = server.voice_user_params(allow_barge_in=True)
+        self.assertTrue(headphones.user_turn_strategies.start[0]._enable_interruptions)
+        self.assertEqual(len(headphones.user_mute_strategies), 1)
+        self.assertTrue(server.is_short_ack("yeah"))
+        self.assertTrue(server.is_short_ack("ok"))
+        self.assertFalse(server.is_short_ack("I have been anxious about work"))
+        self.assertEqual(server.introduction_speech_for(None).count("Emma"), 1)
         self.assertIsInstance(
             params.user_turn_strategies.start[1],
             server.TranscriptionUserTurnStartStrategy,

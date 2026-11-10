@@ -56,6 +56,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMTextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSSpeakFrame,
@@ -133,6 +134,12 @@ VAD_STOP_SECS = 0.2
 VAD_INTERRUPT_CONFIDENCE = 0.82
 # Speakers keep ringing after TTS ends; hold the mic until that tail dies.
 ECHO_HANGOVER_SECS = 1.2
+HEADPHONE_HANGOVER_SECS = 0.2
+FAST_GEMINI_MODEL = "gemini-flash-lite-latest"
+SHORT_ACK = re.compile(
+    r"^(yeah|yes|yep|yup|ok|okay|mm+|mhm+|uh-huh|right|thanks|thank you)[.!?]*$",
+    re.IGNORECASE,
+)
 DEEPGRAM_TTFS_P99_LATENCY = 0.7
 DEEPGRAM_ENDPOINTING_MS = 450
 LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 20
@@ -207,26 +214,74 @@ class MicAudioProbe(FrameProcessor):
         await self.push_frame(outgoing, direction)
 
 
-class ReplyLatencyProbe(FrameProcessor):
-    """Reports provider latency after a finalized user turn."""
+class TurnLatencyTracker:
+    """One line per spoken turn: stop → transcript → Gemini TTFT → TTS audio."""
 
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.user_stop: float | None = None
+        self.transcript: float | None = None
+        self.llm_start: float | None = None
+        self.llm_ttft: float | None = None
+        self.tts_audio: float | None = None
+        self._logged = False
+
+    def mark_user_stop(self):
+        self.reset()
+        self.user_stop = time.monotonic()
+
+    def mark_transcript(self):
+        if self.transcript is None:
+            self.transcript = time.monotonic()
+
+    def mark_llm_start(self):
+        self.llm_start = time.monotonic()
+
+    def mark_llm_token(self):
+        if self.llm_ttft is None:
+            self.llm_ttft = time.monotonic()
+
+    def mark_tts(self):
+        if self.tts_audio is None:
+            self.tts_audio = time.monotonic()
+        if self.llm_start is None or self._logged:
+            return
+        self._logged = True
+        origin = self.user_stop or self.transcript or self.llm_start
+
+        def rel(stamp: float | None) -> str:
+            if stamp is None or origin is None:
+                return "-"
+            return f"{max(0.0, stamp - origin):.2f}s"
+
+        logger.info(
+            "Turn latency stop={} transcript={} llm_start={} llm_ttft={} tts_audio={}",
+            rel(self.user_stop),
+            rel(self.transcript),
+            rel(self.llm_start),
+            rel(self.llm_ttft),
+            rel(self.tts_audio),
+        )
+
+
+class ReplyLatencyProbe(FrameProcessor):
+    """Marks first TTS audio on the shared turn clock."""
+
+    def __init__(self, tracker: TurnLatencyTracker | None = None):
         super().__init__()
-        self._turn_ended_at: float | None = None
+        self._tracker = tracker
         self._logged_playback = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, UserStoppedSpeakingFrame):
-            self._turn_ended_at = time.monotonic()
-        elif isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, TTSAudioRawFrame):
             if not self._logged_playback:
                 self._logged_playback = True
                 logger.info("Emma's voice is playing.")
-            if self._turn_ended_at is not None:
-                now = time.monotonic()
-                logger.info("Provider reply latency {:.2f}s.", now - self._turn_ended_at)
-                self._turn_ended_at = None
+            if self._tracker:
+                self._tracker.mark_tts()
         await self.push_frame(frame, direction)
 
 
@@ -253,9 +308,9 @@ class PlaybackEchoHold:
 class MuteWhileBotSpeakingUserMuteStrategy(BaseUserMuteStrategy):
     """Drop mic/VAD frames while Emma is talking so speaker echo cannot cancel her."""
 
-    def __init__(self):
+    def __init__(self, hangover_secs: float = ECHO_HANGOVER_SECS):
         super().__init__()
-        self._hold = PlaybackEchoHold()
+        self._hold = PlaybackEchoHold(hangover_secs=hangover_secs)
 
     async def process_frame(self, frame: Frame) -> bool:
         self._hold.note(frame)
@@ -265,16 +320,23 @@ class MuteWhileBotSpeakingUserMuteStrategy(BaseUserMuteStrategy):
 class EchoAudioGate(FrameProcessor):
     """Do not send speaker playback into Deepgram while Emma is talking."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        hangover_secs: float = ECHO_HANGOVER_SECS,
+    ):
         super().__init__()
-        self._hold = PlaybackEchoHold()
+        self._enabled = enabled
+        self._hold = PlaybackEchoHold(hangover_secs=hangover_secs)
         self._logged = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         self._hold.note(frame)
         if (
-            self._hold.holding()
+            self._enabled
+            and self._hold.holding()
             and direction == FrameDirection.DOWNSTREAM
             and isinstance(frame, InputAudioRawFrame)
         ):
@@ -288,9 +350,9 @@ class EchoAudioGate(FrameProcessor):
 class EchoTranscriptFilter(FrameProcessor):
     """Drop Deepgram transcripts of Emma's own playback so they do not become user turns."""
 
-    def __init__(self):
+    def __init__(self, hangover_secs: float = ECHO_HANGOVER_SECS):
         super().__init__()
-        self._hold = PlaybackEchoHold()
+        self._hold = PlaybackEchoHold(hangover_secs=hangover_secs)
         self._ignored = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -312,8 +374,9 @@ class EchoTranscriptFilter(FrameProcessor):
 class TranscriptProbe(FrameProcessor):
     """Confirm finalized speech reaches turn detection without logging its text."""
 
-    def __init__(self):
+    def __init__(self, tracker: TurnLatencyTracker | None = None):
         super().__init__()
+        self._tracker = tracker
         self._count = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -321,6 +384,8 @@ class TranscriptProbe(FrameProcessor):
         if isinstance(frame, TranscriptionFrame) and frame.text.strip():
             self._count += 1
             logger.info("Deepgram finalized transcript #{}.", self._count)
+            if self._tracker:
+                self._tracker.mark_transcript()
         await self.push_frame(frame, direction)
 
 # Render's shared parent directory triggers this warning even though the app
@@ -352,6 +417,7 @@ def missing_settings():
 
 class SessionRequest(BaseModel):
     user_name: str | None = None
+    allow_barge_in: bool = False
 
 
 def normalize_person_name(value: str | None) -> str | None:
@@ -466,16 +532,51 @@ def _is_skippable_model_error(exc: BaseException) -> bool:
     return _is_capacity_error(exc)
 
 
+def is_short_ack(text: str) -> bool:
+    cleaned = " ".join(text.split()).strip()
+    if not cleaned or len(cleaned.split()) > 4:
+        return False
+    return bool(SHORT_ACK.match(cleaned))
+
+
+def last_user_text(context) -> str:
+    messages = getattr(context, "messages", None) or []
+    for message in reversed(list(messages)):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip()
+    return ""
+
+
 class EmmaGeminiLLMService(OpenAILLMService):
     """Retries Gemini 503/429 and falls back to another Flash model."""
 
-    def __init__(self, *, models: list[str], system_instruction: str, **kwargs):
+    def __init__(
+        self,
+        *,
+        models: list[str],
+        system_instruction: str,
+        tracker: TurnLatencyTracker | None = None,
+        **kwargs,
+    ):
         self._models = models
         self._system_instruction = system_instruction
+        self._tracker = tracker
         super().__init__(
             settings=_gemini_settings(models[0], system_instruction),
             **kwargs,
         )
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        if (
+            self._tracker
+            and isinstance(frame, LLMTextFrame)
+            and getattr(frame, "text", "").strip()
+        ):
+            self._tracker.mark_llm_token()
+        await super().push_frame(frame, direction)
 
     def _use_model(self, model: str):
         next_settings = _gemini_settings(model, self._system_instruction)
@@ -490,12 +591,20 @@ class EmmaGeminiLLMService(OpenAILLMService):
 
     async def _process_context(self, context):
         last_error: BaseException | None = None
-        for model in self._models:
+        models = list(self._models)
+        if is_short_ack(last_user_text(context)):
+            models = [
+                FAST_GEMINI_MODEL,
+                *[item for item in models if item != FAST_GEMINI_MODEL],
+            ]
+        for model in models:
             self._use_model(model)
             try:
+                if self._tracker:
+                    self._tracker.mark_llm_start()
                 logger.info("Asking Gemini {} for a reply.", model)
                 result = await super()._process_context(context)
-                if model != self._models[0]:
+                if model != models[0]:
                     logger.info("Gemini fell back to {} after earlier model errors.", model)
                 await self.set_usable(True)
                 return result
@@ -521,12 +630,13 @@ class EmmaGeminiLLMService(OpenAILLMService):
         ) from last_error
 
 
-def create_llm(system_instruction: str):
+def create_llm(system_instruction: str, tracker: TurnLatencyTracker | None = None):
     models = gemini_model_chain()
     return (
         EmmaGeminiLLMService(
             models=models,
             system_instruction=system_instruction,
+            tracker=tracker,
             api_key=google_api_key(),
             base_url=GEMINI_BASE_URL,
         ),
@@ -535,8 +645,12 @@ def create_llm(system_instruction: str):
     )
 
 
-def voice_user_params() -> LLMUserAggregatorParams:
-    """Speakerphone-safe turns: Emma finishes, then the user speaks."""
+def voice_user_params(*, allow_barge_in: bool = False) -> LLMUserAggregatorParams:
+    """Speakerphone by default; headphones can barge in."""
+    hangover = HEADPHONE_HANGOVER_SECS if allow_barge_in else ECHO_HANGOVER_SECS
+    mutes: list = [MuteUntilFirstBotCompleteUserMuteStrategy()]
+    if not allow_barge_in:
+        mutes.append(MuteWhileBotSpeakingUserMuteStrategy(hangover_secs=hangover))
     return LLMUserAggregatorParams(
         # Do not barge in. Laptop speakers feed the mic, and interrupting on
         # that echo cancels Emma's reply. Wait until she finishes, ignore the
@@ -551,15 +665,12 @@ def voice_user_params() -> LLMUserAggregatorParams:
             ),
         ),
         user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT_SECS,
-        user_mute_strategies=[
-            MuteUntilFirstBotCompleteUserMuteStrategy(),
-            MuteWhileBotSpeakingUserMuteStrategy(),
-        ],
+        user_mute_strategies=mutes,
         user_turn_strategies=UserTurnStrategies(
             start=[
-                VADUserTurnStartStrategy(enable_interruptions=False),
+                VADUserTurnStartStrategy(enable_interruptions=allow_barge_in),
                 TranscriptionUserTurnStartStrategy(
-                    use_interim=True, enable_interruptions=False
+                    use_interim=True, enable_interruptions=allow_barge_in
                 ),
             ],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=USER_SPEECH_TIMEOUT_SECS)],
@@ -612,9 +723,16 @@ def make_livekit_token(room_name: str, identity: str, name: str) -> str:
     )
 
 
-def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
+def create_worker(
+    room_name: str,
+    bot_token: str,
+    user_name: str | None = None,
+    allow_barge_in: bool = False,
+):
     person_name = normalize_person_name(user_name)
     intro_speech = introduction_speech_for(person_name)
+    hangover = HEADPHONE_HANGOVER_SECS if allow_barge_in else ECHO_HANGOVER_SECS
+    tracker = TurnLatencyTracker()
     name_instruction = (
         f"The person's preferred name is {person_name}. Use their name naturally and sparingly. "
         if person_name
@@ -628,7 +746,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         + name_instruction
         + "Never address the person as 'user'."
     )
-    llm, provider, dialogue_model = create_llm(system_instruction)
+    llm, provider, dialogue_model = create_llm(system_instruction, tracker=tracker)
     transport = LiveKitTransport(
         url=os.environ["LIVEKIT_URL"].strip(),
         token=bot_token,
@@ -642,7 +760,12 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             audio_out_auto_silence=False,
         ),
     )
-    logger.info("Voice dialogue provider/model: {}/{}", provider, dialogue_model)
+    logger.info(
+        "Voice dialogue provider/model: {}/{}; barge_in={}",
+        provider,
+        dialogue_model,
+        allow_barge_in,
+    )
     stt = EmmaDeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
         ttfs_p99_latency=DEEPGRAM_TTFS_P99_LATENCY,
@@ -673,13 +796,14 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     context = LLMContext(messages=[])
     user, assistant = LLMContextAggregatorPair(
         context,
-        user_params=voice_user_params(),
+        user_params=voice_user_params(allow_barge_in=allow_barge_in),
     )
 
     @user.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
         content = (getattr(message, "content", None) or "").strip()
         if content:
+            tracker.mark_user_stop()
             logger.info("User turn ended; generating Emma's reply.")
         else:
             logger.info("User turn ended without speech; waiting.")
@@ -687,14 +811,14 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         Pipeline([
             transport.input(),
             MicAudioProbe(),
-            EchoAudioGate(),
+            EchoAudioGate(enabled=not allow_barge_in, hangover_secs=hangover),
             stt,
-            EchoTranscriptFilter(),
-            TranscriptProbe(),
+            EchoTranscriptFilter(hangover_secs=hangover),
+            TranscriptProbe(tracker),
             user,
             llm,
             tts,
-            ReplyLatencyProbe(),
+            ReplyLatencyProbe(tracker),
             transport.output(),
             assistant,
         ]),
@@ -780,14 +904,40 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     return run
 
 
+async def warmup_gemini():
+    key = google_api_key()
+    if not key or key.startswith("test-") or key == "test-placeholder":
+        return
+    model = gemini_model_chain()[0]
+    try:
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=key, base_url=GEMINI_BASE_URL)
+        request: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ok"}],
+            "max_tokens": 1,
+        }
+        extra = _gemini_settings(model, "").extra
+        if extra.get("reasoning_effort"):
+            request["reasoning_effort"] = extra["reasoning_effort"]
+        if extra.get("extra_body"):
+            request["extra_body"] = extra["extra_body"]
+        await client.chat.completions.create(**request)
+        logger.info("Gemini warmup complete ({}).", model)
+    except Exception:
+        logger.warning("Gemini warmup did not finish; the first reply may be slower.")
+
+
 async def run_session_worker(
     room_name: str,
     bot_token: str,
     user_name: str | None = None,
+    allow_barge_in: bool = False,
 ):
     """Initialize providers outside the session-token request path."""
     try:
-        run = create_worker(room_name, bot_token, user_name)
+        run = create_worker(room_name, bot_token, user_name, allow_barge_in=allow_barge_in)
         await run()
     except asyncio.CancelledError:
         raise
@@ -862,9 +1012,15 @@ async def create_session(payload: SessionRequest | None = None):
         user_token = make_livekit_token(room_name, f"user-{session_id}", "Emma user")
         bot_token = make_livekit_token(room_name, f"emma-{session_id}", "Emma")
         user_name = normalize_person_name(payload.user_name if payload else None)
-        task = asyncio.create_task(run_session_worker(room_name, bot_token, user_name))
+        allow_barge_in = bool(payload.allow_barge_in) if payload else False
+        task = asyncio.create_task(
+            run_session_worker(
+                room_name, bot_token, user_name, allow_barge_in=allow_barge_in
+            )
+        )
         tasks.add(task)
         task.add_done_callback(tasks.discard)
+        asyncio.create_task(warmup_gemini())
 
     return {
         "url": os.environ["LIVEKIT_URL"].strip(),
