@@ -87,13 +87,18 @@ VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
-# 2.5-flash is retired for new API keys (404). 3.1-flash-lite still 503s
+# 2.5-flash is retired for new API keys (404/400). 3.1-flash-lite still 503s
 # under load, so prefer current Flash-Lite and keep 3.1 as a fallback.
 DEFAULT_GEMINI_FALLBACKS = (
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
     "gemini-3.6-flash",
 )
+RETIRED_GEMINI_MODELS = frozenset({
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+})
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
@@ -271,6 +276,8 @@ def gemini_model_chain() -> list[str]:
         or os.getenv("GOOGLE_MODEL", "").strip()
         or DEFAULT_GEMINI_MODEL
     )
+    if primary.lower() in RETIRED_GEMINI_MODELS:
+        primary = DEFAULT_GEMINI_MODEL
     configured = [
         value.strip()
         for value in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",")
@@ -278,10 +285,13 @@ def gemini_model_chain() -> list[str]:
     ]
     extras = configured or list(DEFAULT_GEMINI_FALLBACKS)
     models: list[str] = []
-    for model in (primary, *extras):
-        if model and model not in models:
-            models.append(model)
-    return models
+    for model in (primary, *extras, DEFAULT_GEMINI_MODEL, *DEFAULT_GEMINI_FALLBACKS):
+        if not model or model in models:
+            continue
+        if model.lower() in RETIRED_GEMINI_MODELS:
+            continue
+        models.append(model)
+    return models or [DEFAULT_GEMINI_MODEL]
 
 
 def _gemini_settings(model: str, system_instruction: str) -> OpenAILLMService.Settings:

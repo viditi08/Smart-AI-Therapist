@@ -69,15 +69,21 @@ class VoiceServerTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "GEMINI_MODEL": "gemini-2.5-flash",
-                "GEMINI_FALLBACK_MODELS": "gemini-2.5-flash,gemini-2.0-flash",
+                "GEMINI_MODEL": "gemini-3.5-flash-lite",
+                "GEMINI_FALLBACK_MODELS": "gemini-3.5-flash-lite,gemini-3.1-flash-lite",
             },
             clear=False,
         ):
             self.assertEqual(
-                server.gemini_model_chain(),
-                ["gemini-2.5-flash", "gemini-2.0-flash"],
+                server.gemini_model_chain()[:2],
+                ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"],
             )
+
+    def test_retired_gemini_env_model_is_skipped(self):
+        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-2.5-flash"}, clear=False):
+            chain = server.gemini_model_chain()
+        self.assertNotIn("gemini-2.5-flash", chain)
+        self.assertEqual(chain[0], "gemini-3.5-flash-lite")
 
     def test_gemini_capacity_errors_are_skippable(self):
         overloaded = RuntimeError("This model is currently experiencing high demand")
