@@ -238,7 +238,7 @@ class VoiceServerTests(unittest.TestCase):
         )
         self.assertGreaterEqual(
             params.user_turn_strategies.stop[0]._user_speech_timeout,
-            0.5,
+            0.7,
         )
         self.assertGreater(
             server.USER_TURN_STOP_TIMEOUT_SECS,
@@ -246,8 +246,13 @@ class VoiceServerTests(unittest.TestCase):
         )
         self.assertEqual(params.vad_analyzer._params.stop_secs, server.VAD_STOP_SECS)
         self.assertLess(server.VAD_STOP_SECS, server.DEEPGRAM_TTFS_P99_LATENCY)
-        self.assertLess(server.DEEPGRAM_ENDPOINTING_MS, 400)
+        self.assertGreaterEqual(params.vad_analyzer._params.confidence, 0.7)
+        self.assertLessEqual(params.vad_analyzer._params.confidence, 0.8)
+        self.assertLess(server.DEEPGRAM_ENDPOINTING_MS, 600)
+        self.assertEqual(server.ELEVENLABS_MODEL, "eleven_turbo_v2")
+        self.assertAlmostEqual(server.ELEVENLABS_STABILITY, 0.9)
         self.assertEqual(server.LIVEKIT_AUDIO_OUT_10MS_CHUNKS, 4)
+        self.assertGreaterEqual(server.USER_REJOIN_GRACE_SECS, 8)
         self.assertLessEqual(server.VOICE_MAX_TOKENS, 100)
         self.assertEqual(len(params.user_turn_strategies.start), 2)
         self.assertIsInstance(

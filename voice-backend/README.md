@@ -2,7 +2,7 @@
 
 Emma's Next.js interface joins a private LiveKit room with this Python/Pipecat
 worker. The spoken pipeline is Deepgram Nova-3 → Gemini Flash-Lite →
-ElevenLabs Flash v2.5. LiveKit carries browser and bot audio.
+ElevenLabs Turbo v2. LiveKit carries browser and bot audio.
 
 ## Required accounts and environment variables
 

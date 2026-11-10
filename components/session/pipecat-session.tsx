@@ -124,10 +124,10 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
         transport: new LiveKitTransport({
           webAudioMix: false,
           audioCaptureDefaults: {
-            autoGainControl: true,
             channelCount: 1,
             echoCancellation: true,
             noiseSuppression: true,
+            autoGainControl: true,
           },
         }),
         enableMic: true,
@@ -155,10 +155,10 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
             }
           },
           onBotDisconnected: () => {
-            if (!current()) return;
+            if (!current() || userStoppedRef.current) return;
             stop(false);
             setError(
-              "Emma's voice session was replaced. Close other Emma tabs, then tap Continue.",
+              "Emma left this call. Close extra Emma tabs if you have any, then tap Continue once.",
             );
           },
           onError: (message) => {

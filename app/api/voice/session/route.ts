@@ -3,8 +3,12 @@ import { auth } from "@/auth";
 export const runtime = "nodejs";
 
 function backendUrl(): string {
-  const configured = (process.env.PIPECAT_BACKEND_URL || "").trim();
-  if (configured) return configured.replace(/\/$/, "");
+  const configured = (process.env.PIPECAT_BACKEND_URL || "")
+    .trim()
+    .replace(/^[=]+/, "")
+    .replace(/^["']|["']$/g, "")
+    .replace(/\/$/, "");
+  if (configured) return configured;
   if (process.env.NODE_ENV === "production") {
     return "https://smart-ai-therapist.onrender.com";
   }
@@ -45,8 +49,22 @@ export async function POST(request: Request) {
       room_name?: string;
     } | null;
     if (!response.ok) {
+      const backendDetail =
+        typeof body?.detail === "string"
+          ? body.detail
+          : Array.isArray(body?.detail)
+            ? body.detail.map((item) => String(item)).join(", ")
+            : "";
+      if (response.status === 404 && !backendDetail) {
+        return Response.json(
+          {
+            detail: `Voice server at ${backend} is not running. On Vercel set PIPECAT_BACKEND_URL to https://smart-ai-therapist.onrender.com`,
+          },
+          { status: 502 },
+        );
+      }
       return Response.json(
-        { detail: body?.detail ?? "Could not create a LiveKit session." },
+        { detail: backendDetail || `Could not create a LiveKit session (${response.status}).` },
         { status: response.status },
       );
     }

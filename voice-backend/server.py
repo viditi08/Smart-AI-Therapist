@@ -104,12 +104,17 @@ SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
 QUIET_MIC_CHUNKS = 750
 VOICE_MAX_TOKENS = 96
-USER_TURN_STOP_TIMEOUT_SECS = 0.9
-USER_SPEECH_TIMEOUT_SECS = 0.55
-VAD_STOP_SECS = 0.2
-DEEPGRAM_TTFS_P99_LATENCY = 0.35
-DEEPGRAM_ENDPOINTING_MS = 300
+USER_TURN_STOP_TIMEOUT_SECS = 1.2
+USER_SPEECH_TIMEOUT_SECS = 0.8
+VAD_START_SECS = 0.18
+VAD_STOP_SECS = 0.5
+VAD_INTERRUPT_CONFIDENCE = 0.75
+DEEPGRAM_TTFS_P99_LATENCY = 0.7
+DEEPGRAM_ENDPOINTING_MS = 450
 LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 4
+USER_REJOIN_GRACE_SECS = 12
+ELEVENLABS_MODEL = "eleven_turbo_v2"
+ELEVENLABS_STABILITY = 0.9
 
 
 class EmmaDeepgramSTTService(DeepgramSTTService):
@@ -184,15 +189,20 @@ class ReplyLatencyProbe(FrameProcessor):
     def __init__(self):
         super().__init__()
         self._turn_ended_at: float | None = None
+        self._logged_playback = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, UserStoppedSpeakingFrame):
             self._turn_ended_at = time.monotonic()
-        elif isinstance(frame, TTSAudioRawFrame) and self._turn_ended_at is not None:
-            now = time.monotonic()
-            logger.info("Provider reply latency {:.2f}s.", now - self._turn_ended_at)
-            self._turn_ended_at = None
+        elif isinstance(frame, TTSAudioRawFrame):
+            if not self._logged_playback:
+                self._logged_playback = True
+                logger.info("Emma's voice is playing.")
+            if self._turn_ended_at is not None:
+                now = time.monotonic()
+                logger.info("Provider reply latency {:.2f}s.", now - self._turn_ended_at)
+                self._turn_ended_at = None
         await self.push_frame(frame, direction)
 
 
@@ -419,8 +429,8 @@ def voice_user_params() -> LLMUserAggregatorParams:
         vad_analyzer=SileroVADAnalyzer(
             sample_rate=16000,
             params=VADParams(
-                confidence=0.8,
-                start_secs=0.18,
+                confidence=VAD_INTERRUPT_CONFIDENCE,
+                start_secs=VAD_START_SECS,
                 stop_secs=VAD_STOP_SECS,
                 min_volume=0.7,
             ),
@@ -524,8 +534,10 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         sample_rate=24000,
         settings=ElevenLabsTTSService.Settings(
             voice=os.environ["ELEVENLABS_VOICE_ID"].strip(),
-            model="eleven_flash_v2_5",
-            speed=1.05,
+            model=ELEVENLABS_MODEL,
+            stability=ELEVENLABS_STABILITY,
+            similarity_boost=0.8,
+            speed=1.0,
         ),
     )
     # The opening line goes through the same LLM and TTS pipeline as every
@@ -555,6 +567,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     runner = WorkerRunner(handle_sigint=False)
 
     introduced = False
+    rejoin_task: asyncio.Task | None = None
 
     async def speak_intro():
         nonlocal introduced
@@ -566,21 +579,41 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         logger.info("Speaking Emma's intro.")
         await worker.queue_frames([LLMRunFrame()])
 
+    def cancel_rejoin_wait():
+        nonlocal rejoin_task
+        if rejoin_task and not rejoin_task.done():
+            rejoin_task.cancel()
+        rejoin_task = None
+
     @transport.event_handler("on_first_participant_joined")
     async def first_participant_joined(transport, participant_id):
+        cancel_rejoin_wait()
         logger.info("Participant joined: {}", participant_id)
         await speak_intro()
 
     @transport.event_handler("on_client_connected")
     async def client_connected(transport, participant):
+        cancel_rejoin_wait()
         await speak_intro()
 
     @transport.event_handler("on_participant_disconnected")
     async def disconnected(transport, participant_id):
+        nonlocal rejoin_task
         identity = str(participant_id)
         logger.info("Participant left: {}", identity)
-        if identity.startswith("user-"):
+        if not identity.startswith("user-"):
+            return
+
+        async def end_if_user_stays_gone():
+            try:
+                await asyncio.sleep(USER_REJOIN_GRACE_SECS)
+            except asyncio.CancelledError:
+                return
+            logger.info("User did not rejoin; ending the voice session.")
             await runner.cancel()
+
+        cancel_rejoin_wait()
+        rejoin_task = asyncio.create_task(end_if_user_stays_gone())
 
     async def run():
         try:

@@ -33,7 +33,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 - [Pipecat](https://www.pipecat.ai/) — live voice (Python `voice-backend`)
 - [Deepgram](https://deepgram.com/) — speech-to-text
 - [Google Gemini](https://ai.google.dev/) — dialogue LLM
-- [ElevenLabs](https://elevenlabs.io/) `eleven_flash_v2_5` — text-to-speech
+- [ElevenLabs](https://elevenlabs.io/) `eleven_turbo_v2` — text-to-speech
 
 ---
 
@@ -133,7 +133,7 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
    | `ELEVENLABS_API_KEY` | From [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
    | `ELEVENLABS_VOICE_ID` | Optional; defaults to `21m00Tcm4TlvDq8ikWAM` |
    | `AUTH_TRUST_HOST` | `true` |
-   | `PIPECAT_BACKEND_URL` | Public HTTPS origin of the Python Pipecat server (not Vercel) |
+   | `PIPECAT_BACKEND_URL` | Public HTTPS origin of the Python host, e.g. `https://smart-ai-therapist.onrender.com` (no `=` in the value) |
    | `VOICE_BACKEND_SECRET` | Same random string as on the Python host |
 
 Voice will not work on Vercel alone. Host `voice-backend/` on Render, Railway, Fly.io, or a VM with LiveKit Cloud credentials, set `VOICE_BACKEND_SECRET` on both hosts, then set `PIPECAT_BACKEND_URL` to the Python URL.
