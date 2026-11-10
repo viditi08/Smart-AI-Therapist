@@ -56,9 +56,9 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    LLMRunFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
+    TTSSpeakFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -73,6 +73,10 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+from pipecat.turns.user_mute import (
+    BaseUserMuteStrategy,
+    MuteUntilFirstBotCompleteUserMuteStrategy,
+)
 from pipecat.turns.user_start import (
     TranscriptionUserTurnStartStrategy,
     VADUserTurnStartStrategy,
@@ -101,6 +105,7 @@ VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
 rejoin_tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
+_silero_ready = False
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 # 2.5-flash is retired for new API keys (404/400). 3.1-flash-lite still 503s
 # under load, so prefer current Flash-Lite and keep 3.1 as a fallback.
@@ -119,8 +124,10 @@ SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
 QUIET_MIC_CHUNKS = 750
 VOICE_MAX_TOKENS = 96
-USER_TURN_STOP_TIMEOUT_SECS = 1.2
-USER_SPEECH_TIMEOUT_SECS = 0.8
+# Watchdog only; Pipecat's default is 5s. A short value finalizes the turn
+# before Deepgram's transcript arrives, so Emma never generates a reply.
+USER_TURN_STOP_TIMEOUT_SECS = 5.0
+USER_SPEECH_TIMEOUT_SECS = 0.6
 VAD_START_SECS = 0.32
 VAD_STOP_SECS = 0.2
 VAD_INTERRUPT_CONFIDENCE = 0.82
@@ -221,6 +228,21 @@ class ReplyLatencyProbe(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class MuteWhileBotSpeakingUserMuteStrategy(BaseUserMuteStrategy):
+    """Drop mic/VAD frames while Emma is talking so speaker echo cannot cancel her."""
+
+    def __init__(self):
+        super().__init__()
+        self._bot_speaking = False
+
+    async def process_frame(self, frame: Frame) -> bool:
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+        return self._bot_speaking
+
+
 class EchoTranscriptFilter(FrameProcessor):
     """Drop Deepgram transcripts of Emma's own playback so they do not become user turns."""
 
@@ -315,6 +337,14 @@ def introduction_prompt_for(user_name: str | None) -> str:
     )
 
 
+def introduction_speech_for(user_name: str | None) -> str:
+    name = normalize_person_name(user_name)
+    if not name:
+        return "Hi, I'm Emma. What's on your mind today?"
+    first_name = name.split()[0]
+    return f"Hi {first_name}, I'm Emma. What's on your mind today?"
+
+
 def llm_provider() -> str:
     configured = os.getenv("LLM_PROVIDER", "").strip().lower()
     if configured in ("", "gemini", "google"):
@@ -358,7 +388,12 @@ def _gemini_settings(model: str, system_instruction: str) -> OpenAILLMService.Se
             },
         }
     elif name.startswith("gemini-3"):
-        extra = {"reasoning_effort": "minimal"}
+        extra = {
+            "reasoning_effort": "minimal",
+            "extra_body": {
+                "google": {"thinking_config": {"thinking_level": "minimal"}},
+            },
+        }
     return OpenAILLMService.Settings(
         model=model,
         system_instruction=system_instruction,
@@ -478,6 +513,10 @@ def voice_user_params() -> LLMUserAggregatorParams:
             ),
         ),
         user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT_SECS,
+        user_mute_strategies=[
+            MuteUntilFirstBotCompleteUserMuteStrategy(),
+            MuteWhileBotSpeakingUserMuteStrategy(),
+        ],
         user_turn_strategies=UserTurnStrategies(
             start=[
                 VADUserTurnStartStrategy(),
@@ -535,7 +574,7 @@ def make_livekit_token(room_name: str, identity: str, name: str) -> str:
 
 def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     person_name = normalize_person_name(user_name)
-    intro_prompt = introduction_prompt_for(person_name)
+    intro_speech = introduction_speech_for(person_name)
     name_instruction = (
         f"The person's preferred name is {person_name}. Use their name naturally and sparingly. "
         if person_name
@@ -589,9 +628,9 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             speed=1.0,
         ),
     )
-    # The opening line goes through the same LLM and TTS pipeline as every
-    # later answer. It is an instruction, not prerecorded or fixed reply text.
-    context = LLMContext(messages=[{"role": "user", "content": intro_prompt}])
+    # Speak a canned intro over the already-open ElevenLabs socket so the
+    # greeting does not wait on Gemini. The first user turn is the first LLM call.
+    context = LLMContext(messages=[])
     user, assistant = LLMContextAggregatorPair(
         context,
         user_params=voice_user_params(),
@@ -599,7 +638,11 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
 
     @user.event_handler("on_user_turn_stopped")
     async def on_user_turn_stopped(aggregator, strategy, message):
-        logger.info("User turn ended; generating Emma's reply.")
+        content = (getattr(message, "content", None) or "").strip()
+        if content:
+            logger.info("User turn ended; generating Emma's reply.")
+        else:
+            logger.info("User turn ended without speech; waiting.")
     worker = PipelineWorker(
         Pipeline([
             transport.input(),
@@ -621,17 +664,22 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     runner = WorkerRunner(handle_sigint=False)
 
     introduced = False
+    pipeline_ready = False
     rejoin_task: asyncio.Task | None = None
 
     async def speak_intro():
         nonlocal introduced
-        if introduced:
+        if introduced or not pipeline_ready:
             return
         introduced = True
-        # Let LiveKit finish publishing the bot audio track first.
-        await asyncio.sleep(0.2)
         logger.info("Speaking Emma's intro.")
-        await worker.queue_frames([LLMRunFrame()])
+        await worker.queue_frames([TTSSpeakFrame(text=intro_speech)])
+
+    @worker.event_handler("on_pipeline_started")
+    async def on_pipeline_started(started_worker, frame):
+        nonlocal pipeline_ready
+        pipeline_ready = True
+        await speak_intro()
 
     def cancel_rejoin_wait():
         nonlocal rejoin_task
@@ -708,6 +756,11 @@ async def run_session_worker(
 
 @asynccontextmanager
 async def lifespan(app):
+    global _silero_ready
+    if not _silero_ready:
+        SileroVADAnalyzer(sample_rate=16000)
+        _silero_ready = True
+        logger.info("Silero VAD is ready.")
     yield
     pending = list(tasks)
     for task in pending:

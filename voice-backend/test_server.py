@@ -62,6 +62,10 @@ class VoiceServerTests(unittest.TestCase):
         self.assertEqual(server.gemini_model_chain()[0], "gemini-3.5-flash-lite")
         settings = server._gemini_settings("gemini-3.5-flash-lite", "Test Emma prompt")
         self.assertEqual(settings.extra.get("reasoning_effort"), "minimal")
+        self.assertEqual(
+            settings.extra.get("extra_body"),
+            {"google": {"thinking_config": {"thinking_level": "minimal"}}},
+        )
         flash25 = server._gemini_settings("gemini-2.5-flash", "Test Emma prompt")
         self.assertEqual(flash25.extra.get("reasoning_effort"), "none")
 
@@ -211,6 +215,8 @@ class VoiceServerTests(unittest.TestCase):
         self.assertNotIn("what I would like you to call me", guest_prompt)
         self.assertIn("Maya", named_prompt)
         self.assertIn("what is on their mind", named_prompt)
+        self.assertEqual(server.introduction_speech_for(None), "Hi, I'm Emma. What's on your mind today?")
+        self.assertIn("Maya", server.introduction_speech_for("Maya Patel"))
         self.assertEqual(server.normalize_person_name("  Maya   Patel  "), "Maya Patel")
         mic = server.MicAudioProbe()
         self.assertTrue(callable(mic.process_frame))
@@ -241,7 +247,17 @@ class VoiceServerTests(unittest.TestCase):
         )
         self.assertGreaterEqual(
             params.user_turn_strategies.stop[0]._user_speech_timeout,
-            0.7,
+            0.5,
+        )
+        self.assertGreaterEqual(server.USER_TURN_STOP_TIMEOUT_SECS, 5.0)
+        self.assertEqual(len(params.user_mute_strategies), 2)
+        self.assertIsInstance(
+            params.user_mute_strategies[0],
+            server.MuteUntilFirstBotCompleteUserMuteStrategy,
+        )
+        self.assertIsInstance(
+            params.user_mute_strategies[1],
+            server.MuteWhileBotSpeakingUserMuteStrategy,
         )
         self.assertGreater(
             server.USER_TURN_STOP_TIMEOUT_SECS,
