@@ -186,16 +186,19 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
                 : "Voice connection failed. Check the Render logs and try again.",
             );
           },
-          onTrackStarted: (track, participant) => {
+            onTrackStarted: (track, participant) => {
             if (!current() || participant?.local || track.kind !== "audio") return;
             const audio = audioRef.current;
             if (!audio) return;
-            const currentStream = audio.srcObject;
-            const alreadyAttached =
-              currentStream instanceof MediaStream &&
-              currentStream.getAudioTracks().some((existing) => existing.id === track.id);
-            if (!alreadyAttached) {
-              audio.srcObject = new MediaStream([track]);
+            const currentStream =
+              audio.srcObject instanceof MediaStream
+                ? audio.srcObject
+                : new MediaStream();
+            if (!currentStream.getAudioTracks().some((existing) => existing.id === track.id)) {
+              currentStream.addTrack(track);
+            }
+            if (audio.srcObject !== currentStream) {
+              audio.srcObject = currentStream;
             }
             audio.muted = false;
             audio.volume = 1;

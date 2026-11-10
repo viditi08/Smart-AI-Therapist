@@ -37,6 +37,17 @@ def _audio_stream_init(self, track, *args, **kwargs):
 
 livekit_rtc.AudioStream.__init__ = _audio_stream_init
 
+# Give LiveKit a deeper playback queue so brief TTS gaps do not become glitches.
+_ORIG_AUDIO_SOURCE_INIT = livekit_rtc.AudioSource.__init__
+
+
+def _audio_source_init(self, *args, **kwargs):
+    kwargs.setdefault("queue_size_ms", 2000)
+    return _ORIG_AUDIO_SOURCE_INIT(self, *args, **kwargs)
+
+
+livekit_rtc.AudioSource.__init__ = _audio_source_init
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
@@ -106,12 +117,12 @@ QUIET_MIC_CHUNKS = 750
 VOICE_MAX_TOKENS = 96
 USER_TURN_STOP_TIMEOUT_SECS = 1.2
 USER_SPEECH_TIMEOUT_SECS = 0.8
-VAD_START_SECS = 0.18
+VAD_START_SECS = 0.32
 VAD_STOP_SECS = 0.5
-VAD_INTERRUPT_CONFIDENCE = 0.75
+VAD_INTERRUPT_CONFIDENCE = 0.82
 DEEPGRAM_TTFS_P99_LATENCY = 0.7
 DEEPGRAM_ENDPOINTING_MS = 450
-LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 4
+LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 20
 USER_REJOIN_GRACE_SECS = 12
 ELEVENLABS_MODEL = "eleven_turbo_v2"
 ELEVENLABS_STABILITY = 0.9
@@ -512,6 +523,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             audio_out_enabled=True,
             audio_out_sample_rate=24000,
             audio_out_10ms_chunks=LIVEKIT_AUDIO_OUT_10MS_CHUNKS,
+            audio_out_auto_silence=False,
         ),
     )
     logger.info("Voice dialogue provider/model: {}/{}", provider, dialogue_model)
