@@ -43,17 +43,18 @@ export async function POST(request: Request) {
       body: JSON.stringify({ user_name: userName }),
     });
     const body = (await response.json().catch(() => null)) as {
-      detail?: string;
+      detail?: unknown;
       url?: string;
       token?: string;
       room_name?: string;
     } | null;
     if (!response.ok) {
+      const rawDetail = body?.detail;
       const backendDetail =
-        typeof body?.detail === "string"
-          ? body.detail
-          : Array.isArray(body?.detail)
-            ? body.detail.map((item) => String(item)).join(", ")
+        typeof rawDetail === "string"
+          ? rawDetail
+          : Array.isArray(rawDetail)
+            ? rawDetail.map((item) => String(item)).join(", ")
             : "";
       if (response.status === 404 && !backendDetail) {
         return Response.json(
