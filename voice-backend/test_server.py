@@ -49,9 +49,27 @@ class VoiceServerTests(unittest.TestCase):
             llm, provider, model = server.create_llm("Test Emma prompt")
         self.assertEqual(provider, "google")
         self.assertEqual(model, "gemini-3.1-flash-lite")
-        self.assertIsInstance(llm, server.OpenAILLMService)
+        self.assertEqual(
+            server.gemini_model_chain()[:2],
+            ["gemini-3.1-flash-lite", "gemini-2.5-flash"],
+        )
+        self.assertIsInstance(llm, server.EmmaGeminiLLMService)
         self.assertIn("generativelanguage.googleapis.com", str(llm._client.base_url))
         self.assertEqual(llm._settings.extra.get("extra_body"), {"reasoning_effort": "minimal"})
+
+    def test_gemini_fallback_skips_duplicates(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_MODEL": "gemini-2.5-flash",
+                "GEMINI_FALLBACK_MODELS": "gemini-2.5-flash,gemini-2.0-flash",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                server.gemini_model_chain(),
+                ["gemini-2.5-flash", "gemini-2.0-flash"],
+            )
 
     def test_unknown_llm_provider_is_reported(self):
         with patch.dict(os.environ, {"LLM_PROVIDER": "unknown"}, clear=True):

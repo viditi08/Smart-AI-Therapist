@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from livekit import api as livekit_api
 from livekit import rtc as livekit_rtc
 from loguru import logger
+from openai import APIStatusError
 from pydantic import BaseModel
 
 # Pipecat opens LiveKit AudioStream at 48 kHz, then resamples to 16 kHz with
@@ -85,6 +86,13 @@ VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+# 3.1-flash-lite is fast but Google often returns 503 under load. These
+# stay in the same Gemini family so a capacity miss still produces speech.
+DEFAULT_GEMINI_FALLBACKS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+)
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
@@ -254,28 +262,105 @@ def llm_provider() -> str:
     return configured
 
 
-def create_llm(system_instruction: str):
-    model = (
+def gemini_model_chain() -> list[str]:
+    primary = (
         os.getenv("GEMINI_MODEL", "").strip()
         or os.getenv("GOOGLE_MODEL", "").strip()
         or DEFAULT_GEMINI_MODEL
     )
-    settings = OpenAILLMService.Settings(
+    configured = [
+        value.strip()
+        for value in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",")
+        if value.strip()
+    ]
+    extras = configured or list(DEFAULT_GEMINI_FALLBACKS)
+    models: list[str] = []
+    for model in (primary, *extras):
+        if model and model not in models:
+            models.append(model)
+    return models
+
+
+def _gemini_settings(model: str, system_instruction: str) -> OpenAILLMService.Settings:
+    extra = {}
+    if model.startswith("gemini-3"):
+        extra = {"extra_body": {"reasoning_effort": "minimal"}}
+    return OpenAILLMService.Settings(
         model=model,
         system_instruction=system_instruction,
         max_tokens=VOICE_MAX_TOKENS,
         temperature=0.7,
         top_p=0.9,
-        extra={"extra_body": {"reasoning_effort": "minimal"}},
+        extra=extra,
     )
+
+
+def _is_capacity_error(exc: BaseException) -> bool:
+    status = getattr(exc, "status_code", None)
+    if status in (429, 503):
+        return True
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in ("503", "429", "high demand", "overloaded", "unavailable")
+    )
+
+
+class EmmaGeminiLLMService(OpenAILLMService):
+    """Retries Gemini 503/429 and falls back to another Flash model."""
+
+    def __init__(self, *, models: list[str], system_instruction: str, **kwargs):
+        self._models = models
+        self._system_instruction = system_instruction
+        super().__init__(
+            settings=_gemini_settings(models[0], system_instruction),
+            **kwargs,
+        )
+
+    def _use_model(self, model: str):
+        next_settings = _gemini_settings(model, self._system_instruction)
+        self._settings.model = next_settings.model
+        self._settings.extra = next_settings.extra
+
+    async def _process_context(self, context):
+        last_error: BaseException | None = None
+        for model in self._models:
+            self._use_model(model)
+            try:
+                result = await super()._process_context(context)
+                if model != self._models[0]:
+                    logger.info("Gemini fell back to {} after capacity errors.", model)
+                return result
+            except APIStatusError as exc:
+                last_error = exc
+                if not _is_capacity_error(exc):
+                    raise
+                logger.warning(
+                    "Gemini {} returned {} (high demand). Trying the next model.",
+                    model,
+                    exc.status_code,
+                )
+                await asyncio.sleep(0.25)
+            except Exception as exc:
+                last_error = exc
+                if not _is_capacity_error(exc):
+                    raise
+                logger.warning("Gemini {} unavailable: {}. Trying the next model.", model, exc)
+                await asyncio.sleep(0.25)
+        raise last_error or RuntimeError("Gemini returned no completion")
+
+
+def create_llm(system_instruction: str):
+    models = gemini_model_chain()
     return (
-        OpenAILLMService(
+        EmmaGeminiLLMService(
+            models=models,
+            system_instruction=system_instruction,
             api_key=google_api_key(),
             base_url=GEMINI_BASE_URL,
-            settings=settings,
         ),
         "google",
-        model,
+        models[0],
     )
 
 
