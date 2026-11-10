@@ -1,0 +1,3 @@
+#!/bin/sh
+cd voice-backend
+exec python -m uvicorn server:app --host 0.0.0.0 --port "${PORT:-7860}"
