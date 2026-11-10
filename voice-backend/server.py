@@ -560,8 +560,10 @@ async def create_session(payload: SessionRequest | None = None):
 
 if __name__ == "__main__":
     import uvicorn
+    # Render and other hosts probe 0.0.0.0. Binding 127.0.0.1 makes the
+    # service look like it never opened a port.
     uvicorn.run(
         app,
-        host=os.getenv("HOST", "0.0.0.0"),
+        host="0.0.0.0",
         port=int(os.getenv("PORT", "7860")),
     )

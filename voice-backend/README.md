@@ -67,16 +67,20 @@ with valid credentials is still required to verify audio, latency, and quotas.
 ## Deploy
 
 On Render, keep the service root at `voice-backend`, install from
-`requirements.txt`, and start it with `python server.py`. Add all provider and
-LiveKit variables shown above. Set `FRONTEND_ORIGINS` to the exact Vercel origin,
-for example `https://smart-ai-therapist.vercel.app`.
+`requirements.txt`, and start it with `python server.py`. Do **not** set
+`HOST=127.0.0.1`; the process must listen on `0.0.0.0` so Render can detect
+the port. Add all provider and LiveKit variables shown above. Set
+`FRONTEND_ORIGINS` to the exact Vercel origin, for example
+`https://smart-ai-therapist.vercel.app`.
 
 On Vercel, set the server-side backend URL and the same secret as Render:
 
 ```env
-PIPECAT_BACKEND_URL=https://smart-ai-therapist.onrender.com
+PIPECAT_BACKEND_URL=https://emma-voice.onrender.com
 VOICE_BACKEND_SECRET=choose-a-long-random-string
 ```
+
+On Vercel, put only the URL in the **value** field: `https://emma-voice.onrender.com`. Do not include `PIPECAT_BACKEND_URL=` or a leading `=`.
 
 Redeploy both services after changing variables. Render free instances can take
 time to wake after inactivity.
