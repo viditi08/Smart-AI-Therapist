@@ -51,7 +51,7 @@ class VoiceServerTests(unittest.TestCase):
         self.assertEqual(model, "gemini-3.1-flash-lite")
         self.assertEqual(
             server.gemini_model_chain()[:2],
-            ["gemini-3.1-flash-lite", "gemini-2.5-flash"],
+            ["gemini-3.1-flash-lite", "gemini-flash-lite-latest"],
         )
         self.assertIsInstance(llm, server.EmmaGeminiLLMService)
         self.assertIn("generativelanguage.googleapis.com", str(llm._client.base_url))
@@ -70,6 +70,13 @@ class VoiceServerTests(unittest.TestCase):
                 server.gemini_model_chain(),
                 ["gemini-2.5-flash", "gemini-2.0-flash"],
             )
+
+    def test_gemini_capacity_errors_are_skippable(self):
+        overloaded = RuntimeError("This model is currently experiencing high demand")
+        missing = type("Status", (), {"status_code": 404})()
+        self.assertTrue(server._is_capacity_error(overloaded))
+        self.assertTrue(server._is_skippable_model_error(missing))
+        self.assertFalse(server._is_skippable_model_error(RuntimeError("mic failed")))
 
     def test_unknown_llm_provider_is_reported(self):
         with patch.dict(os.environ, {"LLM_PROVIDER": "unknown"}, clear=True):

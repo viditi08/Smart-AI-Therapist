@@ -65,6 +65,7 @@ from pipecat.turns.user_start import (
 )
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat.utils.errors import ErrorCategory
 from pipecat.workers.runner import WorkerRunner
 
 ROOT = Path(__file__).resolve().parent
@@ -89,9 +90,10 @@ DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 # 3.1-flash-lite is fast but Google often returns 503 under load. These
 # stay in the same Gemini family so a capacity miss still produces speech.
 DEFAULT_GEMINI_FALLBACKS = (
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-2.0-flash",
 )
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400
@@ -295,8 +297,13 @@ def _gemini_settings(model: str, system_instruction: str) -> OpenAILLMService.Se
     )
 
 
-def _is_capacity_error(exc: BaseException) -> bool:
+def _http_status(exc: BaseException) -> int | None:
     status = getattr(exc, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _is_capacity_error(exc: BaseException) -> bool:
+    status = _http_status(exc)
     if status in (429, 503):
         return True
     text = str(exc).lower()
@@ -304,6 +311,13 @@ def _is_capacity_error(exc: BaseException) -> bool:
         marker in text
         for marker in ("503", "429", "high demand", "overloaded", "unavailable")
     )
+
+
+def _is_skippable_model_error(exc: BaseException) -> bool:
+    status = _http_status(exc)
+    if status in (400, 404, 429, 503):
+        return True
+    return _is_capacity_error(exc)
 
 
 class EmmaGeminiLLMService(OpenAILLMService):
@@ -322,6 +336,12 @@ class EmmaGeminiLLMService(OpenAILLMService):
         self._settings.model = next_settings.model
         self._settings.extra = next_settings.extra
 
+    def _classify_error(self, exception: Exception) -> ErrorCategory | None:
+        # A 404 on one fallback model must not disable the LLM for the session.
+        if _is_skippable_model_error(exception):
+            return ErrorCategory.SERVER
+        return super()._classify_error(exception)
+
     async def _process_context(self, context):
         last_error: BaseException | None = None
         for model in self._models:
@@ -329,25 +349,29 @@ class EmmaGeminiLLMService(OpenAILLMService):
             try:
                 result = await super()._process_context(context)
                 if model != self._models[0]:
-                    logger.info("Gemini fell back to {} after capacity errors.", model)
+                    logger.info("Gemini fell back to {} after earlier model errors.", model)
+                await self.set_usable(True)
                 return result
             except APIStatusError as exc:
                 last_error = exc
-                if not _is_capacity_error(exc):
+                if not _is_skippable_model_error(exc):
                     raise
                 logger.warning(
-                    "Gemini {} returned {} (high demand). Trying the next model.",
+                    "Gemini {} returned {}. Trying the next model.",
                     model,
                     exc.status_code,
                 )
                 await asyncio.sleep(0.25)
             except Exception as exc:
                 last_error = exc
-                if not _is_capacity_error(exc):
+                if not _is_skippable_model_error(exc):
                     raise
                 logger.warning("Gemini {} unavailable: {}. Trying the next model.", model, exc)
                 await asyncio.sleep(0.25)
-        raise last_error or RuntimeError("Gemini returned no completion")
+        await self.set_usable(True)
+        raise RuntimeError(
+            "Gemini is temporarily unavailable on every configured model"
+        ) from last_error
 
 
 def create_llm(system_instruction: str):
