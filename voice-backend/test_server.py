@@ -244,6 +244,7 @@ class VoiceServerTests(unittest.TestCase):
             server.USER_TURN_STOP_TIMEOUT_SECS,
             server.USER_SPEECH_TIMEOUT_SECS,
         )
+        self.assertEqual(params.vad_analyzer._params.stop_secs, 0.2)
         self.assertEqual(params.vad_analyzer._params.stop_secs, server.VAD_STOP_SECS)
         self.assertLess(server.VAD_STOP_SECS, server.DEEPGRAM_TTFS_P99_LATENCY)
         self.assertGreaterEqual(params.vad_analyzer._params.confidence, 0.7)
