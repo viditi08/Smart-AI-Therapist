@@ -67,9 +67,13 @@ with valid credentials is still required to verify audio, latency, and quotas.
 ## Deploy
 
 On Render, keep the service root at `voice-backend`, install from
-`requirements.txt`, and start it with `python server.py`. Do **not** set
-`HOST=127.0.0.1`; the process must listen on `0.0.0.0` so Render can detect
-the port. Add all provider and LiveKit variables shown above. Set
+`requirements.txt`, and set **Start Command** to:
+
+```sh
+python -m uvicorn server:app --host 0.0.0.0 --port $PORT
+```
+
+Do **not** set `HOST=127.0.0.1`; Render health checks only see `0.0.0.0`. Add all provider and LiveKit variables shown above. Set
 `FRONTEND_ORIGINS` to the exact Vercel origin, for example
 `https://smart-ai-therapist.vercel.app`.
 

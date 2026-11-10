@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: smart-ai-therapist
+    runtime: python
+    rootDir: voice-backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn server:app --host 0.0.0.0 --port $PORT
