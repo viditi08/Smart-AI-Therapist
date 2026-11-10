@@ -131,6 +131,8 @@ USER_SPEECH_TIMEOUT_SECS = 0.6
 VAD_START_SECS = 0.32
 VAD_STOP_SECS = 0.2
 VAD_INTERRUPT_CONFIDENCE = 0.82
+# Speakers keep ringing after TTS ends; hold the mic until that tail dies.
+ECHO_HANGOVER_SECS = 1.2
 DEEPGRAM_TTFS_P99_LATENCY = 0.7
 DEEPGRAM_ENDPOINTING_MS = 450
 LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 20
@@ -192,7 +194,7 @@ class MicAudioProbe(FrameProcessor):
                 self._logged_audio = True
                 logger.warning(
                     "Microphone audio stayed nearly silent (peak {}). "
-                    "Allow the mic, use headphones, and close extra talk tabs.",
+                    "Allow the mic and close extra talk tabs.",
                     self._peak,
                 )
         elif (
@@ -228,19 +230,59 @@ class ReplyLatencyProbe(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class PlaybackEchoHold:
+    """Stay closed while Emma talks and for a short tail after, for speaker echo."""
+
+    def __init__(self, hangover_secs: float = ECHO_HANGOVER_SECS):
+        self._hangover_secs = hangover_secs
+        self._bot_speaking = False
+        self._open_at = 0.0
+
+    def note(self, frame: Frame) -> None:
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+            self._open_at = 0.0
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+            self._open_at = time.monotonic() + self._hangover_secs
+
+    def holding(self) -> bool:
+        return self._bot_speaking or time.monotonic() < self._open_at
+
+
 class MuteWhileBotSpeakingUserMuteStrategy(BaseUserMuteStrategy):
     """Drop mic/VAD frames while Emma is talking so speaker echo cannot cancel her."""
 
     def __init__(self):
         super().__init__()
-        self._bot_speaking = False
+        self._hold = PlaybackEchoHold()
 
     async def process_frame(self, frame: Frame) -> bool:
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
-        return self._bot_speaking
+        self._hold.note(frame)
+        return self._hold.holding()
+
+
+class EchoAudioGate(FrameProcessor):
+    """Do not send speaker playback into Deepgram while Emma is talking."""
+
+    def __init__(self):
+        super().__init__()
+        self._hold = PlaybackEchoHold()
+        self._logged = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        self._hold.note(frame)
+        if (
+            self._hold.holding()
+            and direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, InputAudioRawFrame)
+        ):
+            if not self._logged:
+                self._logged = True
+                logger.info("Holding the microphone while Emma's voice plays.")
+            return
+        await self.push_frame(frame, direction)
 
 
 class EchoTranscriptFilter(FrameProcessor):
@@ -248,17 +290,14 @@ class EchoTranscriptFilter(FrameProcessor):
 
     def __init__(self):
         super().__init__()
-        self._bot_speaking = False
+        self._hold = PlaybackEchoHold()
         self._ignored = 0
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
-        if isinstance(frame, BotStartedSpeakingFrame):
-            self._bot_speaking = True
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            self._bot_speaking = False
+        self._hold.note(frame)
         if (
-            self._bot_speaking
+            self._hold.holding()
             and direction == FrameDirection.DOWNSTREAM
             and isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
             and getattr(frame, "text", "").strip()
@@ -497,12 +536,11 @@ def create_llm(system_instruction: str):
 
 
 def voice_user_params() -> LLMUserAggregatorParams:
-    """Interrupt Emma as soon as the user starts speaking, then wait for the added sentence."""
+    """Speakerphone-safe turns: Emma finishes, then the user speaks."""
     return LLMUserAggregatorParams(
-        # VAD stops Emma immediately on barge-in. Transcripts still end the
-        # turn so a mid-sentence pause, addition, or rephrase can finish first.
-        # Volume/confidence stay high so Emma's own playback is less likely to
-        # look like the user speaking.
+        # Do not barge in. Laptop speakers feed the mic, and interrupting on
+        # that echo cancels Emma's reply. Wait until she finishes, ignore the
+        # playback tail, then take the user's next sentence.
         vad_analyzer=SileroVADAnalyzer(
             sample_rate=16000,
             params=VADParams(
@@ -519,8 +557,10 @@ def voice_user_params() -> LLMUserAggregatorParams:
         ],
         user_turn_strategies=UserTurnStrategies(
             start=[
-                VADUserTurnStartStrategy(),
-                TranscriptionUserTurnStartStrategy(use_interim=True),
+                VADUserTurnStartStrategy(enable_interruptions=False),
+                TranscriptionUserTurnStartStrategy(
+                    use_interim=True, enable_interruptions=False
+                ),
             ],
             stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=USER_SPEECH_TIMEOUT_SECS)],
         ),
@@ -647,6 +687,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         Pipeline([
             transport.input(),
             MicAudioProbe(),
+            EchoAudioGate(),
             stt,
             EchoTranscriptFilter(),
             TranscriptProbe(),

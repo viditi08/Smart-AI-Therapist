@@ -34,6 +34,7 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
   const generation = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const micHangoverRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const live = stage === "listening" || stage === "speaking";
   const displayName = userName === "You" ? "You" : userName.split(/\s+/)[0];
   const userInitial = displayName.charAt(0).toUpperCase() || "Y";
@@ -46,6 +47,8 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
     abortRef.current?.abort();
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = null;
+    if (micHangoverRef.current) clearTimeout(micHangoverRef.current);
+    micHangoverRef.current = null;
     const client = clientRef.current;
     clientRef.current = null;
     client?.enableMic(false);
@@ -128,6 +131,7 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
+            voiceIsolation: true,
           },
         }),
         enableMic: true,
@@ -211,10 +215,20 @@ export function PipecatSession({ userName, userImage }: PipecatSessionProps) {
           onBotStartedSpeaking: () => {
             if (!current()) return;
             setStage("speaking");
+            if (micHangoverRef.current) clearTimeout(micHangoverRef.current);
+            micHangoverRef.current = null;
+            void clientRef.current?.enableMic(false);
             void audioRef.current?.play().catch(() => {});
           },
           onBotStoppedSpeaking: () => {
-            if (current()) setStage("listening");
+            if (!current()) return;
+            setStage("listening");
+            if (micHangoverRef.current) clearTimeout(micHangoverRef.current);
+            micHangoverRef.current = setTimeout(() => {
+              micHangoverRef.current = null;
+              if (!current() || !clientRef.current) return;
+              void clientRef.current.enableMic(true);
+            }, 1200);
           },
           onUserStartedSpeaking: () => {
             if (current()) setStage("listening");

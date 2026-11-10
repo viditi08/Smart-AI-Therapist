@@ -228,8 +228,16 @@ class VoiceServerTests(unittest.TestCase):
         self.assertTrue(callable(transcript.process_frame))
         self.assertEqual(transcript._count, 0)
         echo = server.EchoTranscriptFilter()
-        self.assertFalse(echo._bot_speaking)
+        self.assertFalse(echo._hold.holding())
         self.assertEqual(echo._ignored, 0)
+        hold = server.PlaybackEchoHold(hangover_secs=1.2)
+        self.assertFalse(hold.holding())
+        hold.note(server.BotStartedSpeakingFrame())
+        self.assertTrue(hold.holding())
+        hold.note(server.BotStoppedSpeakingFrame())
+        self.assertTrue(hold.holding())
+        gate = server.EchoAudioGate()
+        self.assertTrue(callable(gate.process_frame))
         self.assertTrue(issubclass(server.EmmaDeepgramSTTService, server.DeepgramSTTService))
 
     def test_tts_keeps_one_streaming_connection(self):
@@ -280,7 +288,9 @@ class VoiceServerTests(unittest.TestCase):
             params.user_turn_strategies.start[0],
             server.VADUserTurnStartStrategy,
         )
-        self.assertTrue(params.user_turn_strategies.start[0]._enable_interruptions)
+        self.assertFalse(params.user_turn_strategies.start[0]._enable_interruptions)
+        self.assertFalse(params.user_turn_strategies.start[1]._enable_interruptions)
+        self.assertGreaterEqual(server.ECHO_HANGOVER_SECS, 1.0)
         self.assertIsInstance(
             params.user_turn_strategies.start[1],
             server.TranscriptionUserTurnStartStrategy,
