@@ -30,23 +30,14 @@ export const SUMMARIZE_EVERY_N_TURNS = 6;
 /** User+assistant pairs kept verbatim after a rolling summary. */
 export const KEEP_RAW_TURNS_AFTER_SUMMARY = 6;
 
-/** Fastest model verified on this NVIDIA account; used when none is configured. */
-export const DEFAULT_TEXT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b";
+export const DEFAULT_TEXT_MODEL = "gemini-3.1-flash-lite";
 
-/**
- * Tried in order when the configured model keeps failing — NIM returns 503 when a
- * model's workers are saturated, and not every catalog model is enabled per account.
- * Faster models first so a busy primary does not stall the conversation.
- */
-export const FALLBACK_TEXT_MODELS = [
-  "meta/llama-3.2-11b-vision-instruct",
-  "nvidia/nemotron-3-super-120b-a12b",
-];
+export const FALLBACK_TEXT_MODELS: string[] = [];
 
 export function getTextModel(): string {
   return (
+    process.env.GEMINI_MODEL?.trim() ||
     process.env.LLM_MODEL?.trim() ||
-    process.env.NVIDIA_MODEL?.trim() ||
     DEFAULT_TEXT_MODEL
   );
 }

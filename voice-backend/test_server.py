@@ -25,10 +25,10 @@ class VoiceServerTests(unittest.TestCase):
         self.env.stop()
 
     def test_health_reports_names_without_secrets(self):
-        os.environ["NVIDIA_API_KEY"] = "private-test-value"
+        os.environ["GEMINI_API_KEY"] = "private-test-value"
         response = self.client.get("/health")
         self.assertFalse(response.json()["ready"])
-        self.assertNotIn("NVIDIA_API_KEY", response.json()["missing"])
+        self.assertNotIn("GEMINI_API_KEY", response.json()["missing"])
         self.assertNotIn("private-test-value", response.text)
 
     def test_missing_keys_do_not_create_worker(self):
@@ -57,7 +57,7 @@ class VoiceServerTests(unittest.TestCase):
         with patch.dict(os.environ, {"LLM_PROVIDER": "unknown"}, clear=True):
             self.assertEqual(
                 server.missing_settings(),
-                ["LLM_PROVIDER (use google or nvidia)"],
+                ["LLM_PROVIDER (use google)"],
             )
 
     def test_foreign_and_absent_origins_are_rejected(self):
@@ -173,14 +173,6 @@ class VoiceServerTests(unittest.TestCase):
         self.assertIn("Maya", named_prompt)
         self.assertIn("what is on their mind", named_prompt)
         self.assertEqual(server.normalize_person_name("  Maya   Patel  "), "Maya Patel")
-        self.assertEqual(
-            server.nvidia_extra_parameters("nvidia/nemotron-3.5-lightning-30b-a3b"),
-            {
-                "extra_body": {
-                    "chat_template_kwargs": {"enable_thinking": False},
-                },
-            },
-        )
         mic = server.MicAudioProbe()
         self.assertTrue(callable(mic.process_frame))
         self.assertEqual(mic._chunks, 0)

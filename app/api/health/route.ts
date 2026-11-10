@@ -3,9 +3,9 @@ import { isDatabaseUrlConfigured } from "@/lib/database-env";
 
 export function GET() {
   const hasLlm = Boolean(
-    process.env.NVIDIA_API_KEY?.trim() ||
-      process.env.LLM_API_KEY?.trim() ||
-      process.env.OPENAI_API_KEY?.trim(),
+    process.env.GEMINI_API_KEY?.trim() ||
+      process.env.GOOGLE_API_KEY?.trim() ||
+      process.env.LLM_API_KEY?.trim(),
   );
   const hasDb = isDatabaseUrlConfigured();
 
@@ -21,7 +21,7 @@ export function GET() {
     },
     hint: hasLlm
       ? undefined
-      : "Add NVIDIA_API_KEY to .env.local and restart npm run dev. Voice keys live in voice-backend/.env.",
+      : "Add GEMINI_API_KEY for leftover text APIs if you use them. Voice keys live in voice-backend/.env.",
   });
 }
 

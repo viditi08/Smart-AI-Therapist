@@ -56,7 +56,6 @@ from pipecat.processors.aggregators.llm_response_universal import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.nvidia.llm import NvidiaLLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from pipecat.turns.user_start import (
@@ -77,8 +76,7 @@ COMMON_REQUIRED = (
     "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID",
     "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
 )
-# Kept for tests and backwards-compatible NVIDIA deployments.
-REQUIRED = ("NVIDIA_API_KEY", "NVIDIA_MODEL", *COMMON_REQUIRED)
+REQUIRED = (*COMMON_REQUIRED, "GEMINI_API_KEY")
 ORIGINS = [value.strip() for value in os.getenv(
     "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
 ).split(",") if value.strip()]
@@ -86,8 +84,6 @@ ORIGINS = [value.strip() for value in os.getenv(
 VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
-LEGACY_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
-FAST_DIALOGUE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400
@@ -218,13 +214,10 @@ def google_api_key() -> str:
 def missing_settings():
     required = list(COMMON_REQUIRED)
     provider = llm_provider()
-    if provider == "google":
-        if not google_api_key():
-            required.append("GEMINI_API_KEY")
-    elif provider == "nvidia":
-        required.extend(("NVIDIA_API_KEY", "NVIDIA_MODEL"))
-    else:
-        return ["LLM_PROVIDER (use google or nvidia)"]
+    if provider != "google":
+        return ["LLM_PROVIDER (use google)"]
+    if not google_api_key():
+        required.append("GEMINI_API_KEY")
     return [key for key in required if not os.getenv(key, "").strip()]
 
 
@@ -254,72 +247,34 @@ def introduction_prompt_for(user_name: str | None) -> str:
     )
 
 
-def nvidia_extra_parameters(model: str) -> dict:
-    if "nemotron" not in model:
-        return {}
-    # Pipecat expands Settings.extra into OpenAI SDK keyword arguments.
-    # NVIDIA-specific request fields therefore belong under extra_body.
-    return {
-        "extra_body": {
-            "chat_template_kwargs": {"enable_thinking": False},
-        },
-    }
-
-
 def llm_provider() -> str:
     configured = os.getenv("LLM_PROVIDER", "").strip().lower()
-    if configured in ("gemini", "google"):
+    if configured in ("", "gemini", "google"):
         return "google"
-    if configured:
-        return configured
-    if google_api_key():
-        return "google"
-    return "nvidia"
+    return configured
 
 
 def create_llm(system_instruction: str):
-    provider = llm_provider()
-    if provider == "google":
-        model = (
-            os.getenv("GEMINI_MODEL", "").strip()
-            or os.getenv("GOOGLE_MODEL", "").strip()
-            or DEFAULT_GEMINI_MODEL
-        )
-        settings = OpenAILLMService.Settings(
-            model=model,
-            system_instruction=system_instruction,
-            max_tokens=VOICE_MAX_TOKENS,
-            temperature=0.7,
-            top_p=0.9,
-            extra={"extra_body": {"reasoning_effort": "minimal"}},
-        )
-        return (
-            OpenAILLMService(
-                api_key=google_api_key(),
-                base_url=GEMINI_BASE_URL,
-                settings=settings,
-            ),
-            provider,
-            model,
-        )
-
-    configured_model = os.environ["NVIDIA_MODEL"].strip()
-    model = FAST_DIALOGUE_MODEL if configured_model == LEGACY_REASONING_MODEL else configured_model
-    settings = {
-        "model": model,
-        "system_instruction": system_instruction,
-        "max_tokens": VOICE_MAX_TOKENS,
-        "temperature": 1.0,
-        "top_k": 1,
-    }
-    if "nemotron" in model:
-        settings["extra"] = nvidia_extra_parameters(model)
+    model = (
+        os.getenv("GEMINI_MODEL", "").strip()
+        or os.getenv("GOOGLE_MODEL", "").strip()
+        or DEFAULT_GEMINI_MODEL
+    )
+    settings = OpenAILLMService.Settings(
+        model=model,
+        system_instruction=system_instruction,
+        max_tokens=VOICE_MAX_TOKENS,
+        temperature=0.7,
+        top_p=0.9,
+        extra={"extra_body": {"reasoning_effort": "minimal"}},
+    )
     return (
-        NvidiaLLMService(
-            api_key=os.environ["NVIDIA_API_KEY"].strip(),
-            settings=NvidiaLLMService.Settings(**settings),
+        OpenAILLMService(
+            api_key=google_api_key(),
+            base_url=GEMINI_BASE_URL,
+            settings=settings,
         ),
-        provider,
+        "google",
         model,
     )
 

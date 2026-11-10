@@ -32,8 +32,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 - [Prisma](https://www.prisma.io/) + PostgreSQL — users and saved session transcripts
 - [Pipecat](https://www.pipecat.ai/) — live voice (Python `voice-backend`)
 - [Deepgram](https://deepgram.com/) — speech-to-text
-- [Google Gemini](https://ai.google.dev/) — voice dialogue LLM
-- [NVIDIA NIM](https://build.nvidia.com/) — optional text LLM
+- [Google Gemini](https://ai.google.dev/) — dialogue LLM
 - [ElevenLabs](https://elevenlabs.io/) `eleven_flash_v2_5` — text-to-speech
 
 ---
@@ -43,7 +42,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 - **Python 3.11** — for the Pipecat voice backend
 - **Node.js** ≥ 18.18  
 - **PostgreSQL** — hosted (e.g. [Neon](https://neon.tech)) for production; locally optional via [Docker](https://www.docker.com/) (`docker-compose.yml` maps host port **5433**)
-- **Provider keys** — `NVIDIA_API_KEY` for text, plus `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, and LiveKit credentials for voice
+- **Provider keys** — `GEMINI_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`, and LiveKit credentials for voice
 
 ---
 
@@ -131,7 +130,6 @@ Project is configured for Vercel via [`vercel.json`](./vercel.json) (`buildComma
    | `DATABASE_URL` | Neon (or other) Postgres URL; include `sslmode=require` when required |
    | `AUTH_SECRET` | Strong random secret (e.g. `openssl rand -base64 32`) |
    | `DEEPGRAM_API_KEY` | From [Deepgram Console](https://console.deepgram.com) |
-   | `NVIDIA_API_KEY` | From [build.nvidia.com](https://build.nvidia.com) |
    | `ELEVENLABS_API_KEY` | From [ElevenLabs](https://elevenlabs.io/app/settings/api-keys) |
    | `ELEVENLABS_VOICE_ID` | Optional; defaults to `21m00Tcm4TlvDq8ikWAM` |
    | `AUTH_TRUST_HOST` | `true` |

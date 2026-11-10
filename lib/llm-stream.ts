@@ -2,8 +2,7 @@ import type { PipelineMessage } from "@/lib/pipeline-types";
 import { FALLBACK_TEXT_MODELS, getTextModel } from "@/lib/pipeline-types";
 
 /**
- * Therapist LLM — NVIDIA NIM through its OpenAI-compatible chat completions API.
- * Point `LLM_BASE_URL` / `LLM_API_KEY` at any other OpenAI-compatible provider to swap it out.
+ * Therapist LLM — Gemini through its OpenAI-compatible chat completions API.
  */
 
 export interface StreamTextOptions {
@@ -19,7 +18,7 @@ export interface StreamTextChunk {
   isFirst: boolean;
 }
 
-const DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 function getBaseUrl(): string {
   const raw = process.env.LLM_BASE_URL?.trim() || DEFAULT_BASE_URL;
@@ -28,16 +27,16 @@ function getBaseUrl(): string {
 
 function getApiKey(): string {
   const key =
-    process.env.NVIDIA_API_KEY?.trim() ||
-    process.env.LLM_API_KEY?.trim() ||
-    process.env.OPENAI_API_KEY?.trim();
-  if (!key) throw new Error("Server missing NVIDIA_API_KEY");
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim() ||
+    process.env.LLM_API_KEY?.trim();
+  if (!key) throw new Error("Server missing GEMINI_API_KEY");
   return key;
 }
 
 /**
- * NVIDIA retires models permanently (410 Gone) and gates others per account (404).
- * Remember those so a retired model costs one wasted request per process, not one per turn.
+ * Remember retired/unavailable models so a failed catalog entry costs one
+ * request per process, not one per turn.
  */
 const retiredModels = new Set<string>();
 
@@ -130,7 +129,7 @@ function createThinkStripper() {
   };
 }
 
-/** NIM returns these while a model's workers are saturated; the same request usually succeeds shortly after. */
+/** Retry these while a model is saturated; the same request usually succeeds shortly after. */
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 class LlmHttpError extends Error {
