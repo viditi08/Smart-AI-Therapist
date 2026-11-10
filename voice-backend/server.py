@@ -86,14 +86,13 @@ ORIGINS = [value.strip() for value in os.getenv(
 VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-# 3.1-flash-lite is fast but Google often returns 503 under load. Use a
-# higher-capacity Flash model first so a refresh does not hit the same outage.
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+# 2.5-flash is retired for new API keys (404). 3.1-flash-lite still 503s
+# under load, so prefer current Flash-Lite and keep 3.1 as a fallback.
 DEFAULT_GEMINI_FALLBACKS = (
-    "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.6-flash",
 )
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400

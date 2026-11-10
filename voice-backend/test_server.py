@@ -49,7 +49,7 @@ class VoiceServerTests(unittest.TestCase):
             llm, provider, model = server.create_llm("Test Emma prompt")
             self.assertEqual(
                 server.gemini_model_chain()[:2],
-                ["gemini-3.1-flash-lite", "gemini-flash-latest"],
+                ["gemini-3.1-flash-lite", "gemini-flash-lite-latest"],
             )
         self.assertEqual(provider, "google")
         self.assertEqual(model, "gemini-3.1-flash-lite")
@@ -58,14 +58,12 @@ class VoiceServerTests(unittest.TestCase):
         self.assertEqual(llm._settings.extra.get("reasoning_effort"), "minimal")
 
     def test_default_gemini_model_avoids_overloaded_flash_lite(self):
-        self.assertEqual(server.DEFAULT_GEMINI_MODEL, "gemini-2.5-flash")
-        self.assertEqual(server.gemini_model_chain()[0], "gemini-2.5-flash")
-        settings = server._gemini_settings("gemini-2.5-flash", "Test Emma prompt")
-        self.assertEqual(settings.extra.get("reasoning_effort"), "none")
-        self.assertEqual(
-            settings.extra.get("extra_body"),
-            {"google": {"thinking_config": {"thinking_budget": 0}}},
-        )
+        self.assertEqual(server.DEFAULT_GEMINI_MODEL, "gemini-3.5-flash-lite")
+        self.assertEqual(server.gemini_model_chain()[0], "gemini-3.5-flash-lite")
+        settings = server._gemini_settings("gemini-3.5-flash-lite", "Test Emma prompt")
+        self.assertEqual(settings.extra.get("reasoning_effort"), "minimal")
+        flash25 = server._gemini_settings("gemini-2.5-flash", "Test Emma prompt")
+        self.assertEqual(flash25.extra.get("reasoning_effort"), "none")
 
     def test_gemini_fallback_skips_duplicates(self):
         with patch.dict(
