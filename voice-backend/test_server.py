@@ -221,6 +221,9 @@ class VoiceServerTests(unittest.TestCase):
         transcript = server.TranscriptProbe()
         self.assertTrue(callable(transcript.process_frame))
         self.assertEqual(transcript._count, 0)
+        echo = server.EchoTranscriptFilter()
+        self.assertFalse(echo._bot_speaking)
+        self.assertEqual(echo._ignored, 0)
         self.assertTrue(issubclass(server.EmmaDeepgramSTTService, server.DeepgramSTTService))
 
     def test_tts_keeps_one_streaming_connection(self):

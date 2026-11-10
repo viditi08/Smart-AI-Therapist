@@ -51,8 +51,11 @@ livekit_rtc.AudioSource.__init__ = _audio_source_init
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMRunFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -96,6 +99,7 @@ ORIGINS = [value.strip() for value in os.getenv(
 # Preview and production Vercel URLs share this suffix.
 VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
+rejoin_tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 # 2.5-flash is retired for new API keys (404/400). 3.1-flash-lite still 503s
@@ -214,6 +218,33 @@ class ReplyLatencyProbe(FrameProcessor):
                 now = time.monotonic()
                 logger.info("Provider reply latency {:.2f}s.", now - self._turn_ended_at)
                 self._turn_ended_at = None
+        await self.push_frame(frame, direction)
+
+
+class EchoTranscriptFilter(FrameProcessor):
+    """Drop Deepgram transcripts of Emma's own playback so they do not become user turns."""
+
+    def __init__(self):
+        super().__init__()
+        self._bot_speaking = False
+        self._ignored = 0
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+        if (
+            self._bot_speaking
+            and direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, (TranscriptionFrame, InterimTranscriptionFrame))
+            and getattr(frame, "text", "").strip()
+        ):
+            self._ignored += 1
+            if self._ignored == 1:
+                logger.info("Ignoring Deepgram transcripts while Emma is speaking.")
+            return
         await self.push_frame(frame, direction)
 
 
@@ -474,6 +505,12 @@ def session_allowed(request: Request) -> bool:
 
 
 async def drop_existing_session():
+    waiting = [task for task in list(rejoin_tasks) if not task.done()]
+    for task in waiting:
+        task.cancel()
+    if waiting:
+        await asyncio.gather(*waiting, return_exceptions=True)
+    rejoin_tasks.clear()
     pending = [task for task in list(tasks) if not task.done()]
     for task in pending:
         task.cancel()
@@ -559,11 +596,16 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
         context,
         user_params=voice_user_params(),
     )
+
+    @user.event_handler("on_user_turn_stopped")
+    async def on_user_turn_stopped(aggregator, strategy, message):
+        logger.info("User turn ended; generating Emma's reply.")
     worker = PipelineWorker(
         Pipeline([
             transport.input(),
             MicAudioProbe(),
             stt,
+            EchoTranscriptFilter(),
             TranscriptProbe(),
             user,
             llm,
@@ -626,6 +668,8 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
 
         cancel_rejoin_wait()
         rejoin_task = asyncio.create_task(end_if_user_stays_gone())
+        rejoin_tasks.add(rejoin_task)
+        rejoin_task.add_done_callback(rejoin_tasks.discard)
 
     async def run():
         try:
@@ -641,6 +685,8 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
             # Keep credentials and conversation text out of logs, but retain
             # the provider error so hosted deployments can be diagnosed.
             logger.exception("Voice session failed; check provider configuration and quota.")
+        finally:
+            cancel_rejoin_wait()
 
     return run
 
