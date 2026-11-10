@@ -286,9 +286,18 @@ def gemini_model_chain() -> list[str]:
 
 
 def _gemini_settings(model: str, system_instruction: str) -> OpenAILLMService.Settings:
-    extra = {}
-    if model.startswith("gemini-3"):
-        extra = {"extra_body": {"reasoning_effort": "minimal"}}
+    name = model.lower()
+    extra: dict = {}
+    if name.startswith("gemini-2.5") or name.startswith("gemini-2.0"):
+        # 2.5 Flash thinks by default and can sit silent for several seconds.
+        extra = {
+            "reasoning_effort": "none",
+            "extra_body": {
+                "google": {"thinking_config": {"thinking_budget": 0}},
+            },
+        }
+    elif name.startswith("gemini-3"):
+        extra = {"reasoning_effort": "minimal"}
     return OpenAILLMService.Settings(
         model=model,
         system_instruction=system_instruction,
@@ -349,6 +358,7 @@ class EmmaGeminiLLMService(OpenAILLMService):
         for model in self._models:
             self._use_model(model)
             try:
+                logger.info("Asking Gemini {} for a reply.", model)
                 result = await super()._process_context(context)
                 if model != self._models[0]:
                     logger.info("Gemini fell back to {} after earlier model errors.", model)
