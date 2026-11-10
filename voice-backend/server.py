@@ -36,6 +36,8 @@ def _audio_stream_init(self, track, *args, **kwargs):
 
 livekit_rtc.AudioStream.__init__ = _audio_stream_init
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -57,7 +59,10 @@ from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.nvidia.llm import NvidiaLLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
-from pipecat.turns.user_start import TranscriptionUserTurnStartStrategy
+from pipecat.turns.user_start import (
+    TranscriptionUserTurnStartStrategy,
+    VADUserTurnStartStrategy,
+)
 from pipecat.turns.user_stop import SpeechTimeoutUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 from pipecat.workers.runner import WorkerRunner
@@ -83,14 +88,15 @@ tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
 LEGACY_REASONING_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 FAST_DIALOGUE_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400
 # 20 ms frames, so this is roughly fifteen seconds of listening.
 QUIET_MIC_CHUNKS = 750
 VOICE_MAX_TOKENS = 96
-USER_TURN_STOP_TIMEOUT_SECS = 0.55
-DEEPGRAM_ENDPOINTING_MS = 120
+USER_TURN_STOP_TIMEOUT_SECS = 0.9
+USER_SPEECH_TIMEOUT_SECS = 0.55
+DEEPGRAM_ENDPOINTING_MS = 300
 LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 4
 
 
@@ -202,15 +208,23 @@ warnings.filterwarnings(
 )
 
 
+def google_api_key() -> str:
+    return (
+        os.getenv("GEMINI_API_KEY", "").strip()
+        or os.getenv("GOOGLE_API_KEY", "").strip()
+    )
+
+
 def missing_settings():
     required = list(COMMON_REQUIRED)
     provider = llm_provider()
-    if provider == "groq":
-        required.append("GROQ_API_KEY")
+    if provider == "google":
+        if not google_api_key():
+            required.append("GEMINI_API_KEY")
     elif provider == "nvidia":
         required.extend(("NVIDIA_API_KEY", "NVIDIA_MODEL"))
     else:
-        return ["LLM_PROVIDER (use groq or nvidia)"]
+        return ["LLM_PROVIDER (use google or nvidia)"]
     return [key for key in required if not os.getenv(key, "").strip()]
 
 
@@ -254,30 +268,35 @@ def nvidia_extra_parameters(model: str) -> dict:
 
 def llm_provider() -> str:
     configured = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if configured in ("gemini", "google"):
+        return "google"
     if configured:
         return configured
-    return "groq" if os.getenv("GROQ_API_KEY", "").strip() else "nvidia"
+    if google_api_key():
+        return "google"
+    return "nvidia"
 
 
 def create_llm(system_instruction: str):
     provider = llm_provider()
-    if provider == "groq":
-        model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip() or DEFAULT_GROQ_MODEL
+    if provider == "google":
+        model = (
+            os.getenv("GEMINI_MODEL", "").strip()
+            or os.getenv("GOOGLE_MODEL", "").strip()
+            or DEFAULT_GEMINI_MODEL
+        )
         settings = OpenAILLMService.Settings(
             model=model,
             system_instruction=system_instruction,
             max_tokens=VOICE_MAX_TOKENS,
-            temperature=0.6,
+            temperature=0.7,
             top_p=0.9,
-            extra={
-                "reasoning_effort": "low",
-                "extra_body": {"include_reasoning": False},
-            },
+            extra={"extra_body": {"reasoning_effort": "minimal"}},
         )
         return (
             OpenAILLMService(
-                api_key=os.environ["GROQ_API_KEY"].strip(),
-                base_url=GROQ_BASE_URL,
+                api_key=google_api_key(),
+                base_url=GEMINI_BASE_URL,
                 settings=settings,
             ),
             provider,
@@ -306,16 +325,28 @@ def create_llm(system_instruction: str):
 
 
 def voice_user_params() -> LLMUserAggregatorParams:
-    """Use finalized transcripts for reliable consecutive voice turns."""
+    """Interrupt Emma as soon as the user starts speaking, then wait for the added sentence."""
     return LLMUserAggregatorParams(
-        # Deepgram final transcripts drive turns directly. VAD could stay
-        # stuck in SPEAKING when speaker echo reached the microphone, causing
-        # the next finalized sentence to be discarded.
-        vad_analyzer=None,
+        # VAD stops Emma immediately on barge-in. Transcripts still end the
+        # turn so a mid-sentence pause, addition, or rephrase can finish first.
+        # Volume/confidence stay high so Emma's own playback is less likely to
+        # look like the user speaking.
+        vad_analyzer=SileroVADAnalyzer(
+            sample_rate=16000,
+            params=VADParams(
+                confidence=0.8,
+                start_secs=0.18,
+                stop_secs=0.4,
+                min_volume=0.7,
+            ),
+        ),
         user_turn_stop_timeout=USER_TURN_STOP_TIMEOUT_SECS,
         user_turn_strategies=UserTurnStrategies(
-            start=[TranscriptionUserTurnStartStrategy(use_interim=True)],
-            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=0.2)],
+            start=[
+                VADUserTurnStartStrategy(),
+                TranscriptionUserTurnStartStrategy(use_interim=True),
+            ],
+            stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=USER_SPEECH_TIMEOUT_SECS)],
         ),
     )
 

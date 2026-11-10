@@ -1,40 +1,10 @@
-import Link from "next/link";
-import { getSession } from "@/lib/session";
-import { TextPipelineSession } from "@/components/session/text-pipeline-session";
+import { redirect } from "next/navigation";
 
 export const metadata = {
-  title: "Emma · Text pipeline",
-  description:
-    "Same therapist cascade as voice — streaming LLM, crisis detection, rolling summaries, turn metrics.",
+  title: "Talk with Emma",
+  description: "A live voice session with Emma over LiveKit.",
 };
 
-export default async function PipelineSessionPage() {
-  const session = await getSession();
-
-  return (
-    <div className="voice-chat-page">
-      <div className="voice-chat-page-toolbar">
-        <Link className="voice-chat-page-back" href="/">
-          ← Back
-        </Link>
-        <Link className="voice-chat-page-dashboard" href="/account">
-          Dashboard
-        </Link>
-      </div>
-      {!session?.user ? (
-        <div className="session-auth-banner" role="region" aria-label="Sign in">
-          <p className="session-auth-banner-text">
-            Sign in to persist pipeline sessions to your account (optional in local dev).
-          </p>
-          <Link
-            className="btn btn-primary session-auth-banner-btn"
-            href="/login?callbackUrl=/session/pipeline"
-          >
-            Log in
-          </Link>
-        </div>
-      ) : null}
-      <TextPipelineSession />
-    </div>
-  );
+export default function PipelineSessionPage() {
+  redirect("/session/voice");
 }

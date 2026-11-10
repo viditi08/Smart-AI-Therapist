@@ -1,6 +1,6 @@
 # Emma — AI Therapist (landing + Pipecat voice)
 
-Conversational, therapy-style support with **Emma**: a **Pipecat** voice agent (**Deepgram** STT → **Groq** LLM → **ElevenLabs** TTS over LiveKit), plus a Next.js text pipeline, **username/password sign-in**, and **saved conversations** in **PostgreSQL**.
+Conversational, therapy-style support with **Emma**: a **Pipecat** voice agent (**Deepgram** STT → **Gemini** LLM → **ElevenLabs** TTS over LiveKit), **username/password sign-in**, and **saved conversations** in **PostgreSQL**.
 
 **Repository:** [github.com/viditi08/Smart-AI-Therapist](https://github.com/viditi08/Smart-AI-Therapist)  
 **Live site:** [https://smart-ai-therapist.vercel.app](https://smart-ai-therapist.vercel.app)
@@ -14,13 +14,13 @@ Emma is **not** a substitute for emergency services, diagnosis, or care from a l
 **Voice (`/session/voice`)** is a Pipecat process (Python). The browser opens a WebRTC line to it:
 
 ```
-Mic  ──►  LiveKit  ──►  Pipecat (Deepgram → Groq → ElevenLabs)  ──►  Speaker
+Mic  ──►  LiveKit  ──►  Pipecat (Deepgram → Gemini → ElevenLabs)  ──►  Speaker
                         voice-backend on port 7860
 ```
 
 Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **not** run this Python process — run it locally or host it on Render, Railway, Fly, or a VM, then set `PIPECAT_BACKEND_URL`.
 
-**Text (`/session/pipeline`)** uses Next.js `/api/pipeline/turn` and `/api/pipeline/summarize`.
+`/session/pipeline` redirects to `/session/voice`.
 
 ---
 
@@ -32,7 +32,8 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 - [Prisma](https://www.prisma.io/) + PostgreSQL — users and saved session transcripts
 - [Pipecat](https://www.pipecat.ai/) — live voice (Python `voice-backend`)
 - [Deepgram](https://deepgram.com/) — speech-to-text
-- [NVIDIA NIM](https://build.nvidia.com/) — streaming LLM
+- [Google Gemini](https://ai.google.dev/) — voice dialogue LLM
+- [NVIDIA NIM](https://build.nvidia.com/) — optional text LLM
 - [ElevenLabs](https://elevenlabs.io/) `eleven_flash_v2_5` — text-to-speech
 
 ---
@@ -42,7 +43,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
 - **Python 3.11** — for the Pipecat voice backend
 - **Node.js** ≥ 18.18  
 - **PostgreSQL** — hosted (e.g. [Neon](https://neon.tech)) for production; locally optional via [Docker](https://www.docker.com/) (`docker-compose.yml` maps host port **5433**)
-- **Provider keys** — `NVIDIA_API_KEY` for text, plus `DEEPGRAM_API_KEY`, `GROQ_API_KEY`, `ELEVENLABS_API_KEY`, and LiveKit credentials for voice
+- **Provider keys** — `NVIDIA_API_KEY` for text, plus `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, and LiveKit credentials for voice
 
 ---
 
@@ -86,7 +87,7 @@ Pipecat handles turn-taking, interruptions, and streaming audio. Vercel does **n
    cp voice-backend/.env.example voice-backend/.env
    ```
 
-   Put the Deepgram, Groq, ElevenLabs, and LiveKit credentials in `voice-backend/.env`. Then:
+   Put the Deepgram, Gemini, ElevenLabs, and LiveKit credentials in `voice-backend/.env`. Then:
 
    ```bash
    npm run export:emma-prompt
@@ -151,16 +152,15 @@ Voice will not work on Vercel alone. Host `voice-backend/` on Render, Railway, F
 
 ## Project layout (high level)
 
-- `voice-backend/` — Pipecat FastAPI server (Deepgram → Groq → ElevenLabs)
-- `app/` — routes (marketing `/`, `/session/voice`, `/session/pipeline`, `/login`, dashboard `/account`)
-- `app/api/pipeline/` — text chat: `session`, `turn` (SSE), `summarize`
+- `voice-backend/` — Pipecat FastAPI server (Deepgram → Gemini → ElevenLabs)
+- `app/` — routes (marketing `/`, `/session/voice`, `/login`, dashboard `/account`)
 - `auth.ts` / `auth.config.ts` — Auth.js username/password authentication
-- `components/session/` — Pipecat voice UI, text chat, onboarding
+- `components/session/` — Pipecat voice UI and onboarding
 - `prisma/` — schema + migrations
-- `lib/` — NVIDIA stream, crisis detection, Prisma/auth helpers
+- `lib/` — crisis detection, Prisma/auth helpers
 
 ---
 
 ## License / privacy
 
-Treat API keys and `.env.local` as **secret**. Do not commit real credentials. Review the terms of Deepgram, Groq, ElevenLabs, LiveKit, and your host before production use.
+Treat API keys and `.env.local` as **secret**. Do not commit real credentials. Review the terms of Deepgram, Gemini, ElevenLabs, LiveKit, and your host before production use.

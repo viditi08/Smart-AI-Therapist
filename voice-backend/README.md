@@ -1,9 +1,8 @@
 # Emma LiveKit voice backend
 
 Emma's Next.js interface joins a private LiveKit room with this Python/Pipecat
-worker. The spoken pipeline is Deepgram Nova-3 → NVIDIA-hosted dialogue model →
-ElevenLabs Flash v2.5. LiveKit carries browser and bot audio, so this project no
-longer needs custom Metered TURN or SmallWebRTC configuration.
+worker. The spoken pipeline is Deepgram Nova-3 → Gemini Flash-Lite →
+ElevenLabs Flash v2.5. LiveKit carries browser and bot audio.
 
 ## Required accounts and environment variables
 
@@ -12,8 +11,9 @@ from its project settings into `voice-backend/.env` together with the provider
 keys:
 
 ```env
-NVIDIA_API_KEY=
-NVIDIA_MODEL=
+LLM_PROVIDER=google
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-lite
 DEEPGRAM_API_KEY=
 ELEVENLABS_API_KEY=
 ELEVENLABS_VOICE_ID=
@@ -83,5 +83,5 @@ time to wake after inactivity.
 
 Implementation references: [LiveKit transport](https://docs.pipecat.ai/api-reference/server/services/transport/livekit),
 [Deepgram](https://docs.pipecat.ai/api-reference/server/services/stt/deepgram),
-[NVIDIA](https://docs.pipecat.ai/api-reference/server/services/llm/nvidia), and
+[OpenAI-compatible LLM](https://docs.pipecat.ai/api-reference/server/services/llm/openai), and
 [ElevenLabs](https://docs.pipecat.ai/api-reference/server/services/tts/elevenlabs).

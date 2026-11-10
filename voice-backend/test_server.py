@@ -37,25 +37,27 @@ class VoiceServerTests(unittest.TestCase):
             self.assertEqual(response.status_code, 503)
             create_worker.assert_not_called()
 
-    def test_groq_provider_requires_only_its_llm_key(self):
+    def test_google_provider_requires_only_its_llm_key(self):
         settings = {key: "test-placeholder" for key in server.COMMON_REQUIRED}
         settings.update({
-            "LLM_PROVIDER": "groq",
-            "GROQ_API_KEY": "test-groq-key",
-            "GROQ_MODEL": "openai/gpt-oss-20b",
+            "LLM_PROVIDER": "google",
+            "GEMINI_API_KEY": "test-gemini-key",
+            "GEMINI_MODEL": "gemini-3.1-flash-lite",
         })
         with patch.dict(os.environ, settings, clear=True):
             self.assertEqual(server.missing_settings(), [])
             llm, provider, model = server.create_llm("Test Emma prompt")
-        self.assertEqual(provider, "groq")
-        self.assertEqual(model, "openai/gpt-oss-20b")
+        self.assertEqual(provider, "google")
+        self.assertEqual(model, "gemini-3.1-flash-lite")
         self.assertIsInstance(llm, server.OpenAILLMService)
+        self.assertIn("generativelanguage.googleapis.com", str(llm._client.base_url))
+        self.assertEqual(llm._settings.extra.get("extra_body"), {"reasoning_effort": "minimal"})
 
     def test_unknown_llm_provider_is_reported(self):
         with patch.dict(os.environ, {"LLM_PROVIDER": "unknown"}, clear=True):
             self.assertEqual(
                 server.missing_settings(),
-                ["LLM_PROVIDER (use groq or nvidia)"],
+                ["LLM_PROVIDER (use google or nvidia)"],
             )
 
     def test_foreign_and_absent_origins_are_rejected(self):
@@ -198,17 +200,30 @@ class VoiceServerTests(unittest.TestCase):
 
     def test_consecutive_turns_are_driven_by_transcripts(self):
         params = server.voice_user_params()
-        self.assertIsNone(params.vad_analyzer)
+        self.assertIsNotNone(params.vad_analyzer)
         self.assertEqual(
             params.user_turn_stop_timeout,
             server.USER_TURN_STOP_TIMEOUT_SECS,
         )
-        self.assertLess(server.DEEPGRAM_ENDPOINTING_MS, 200)
+        self.assertGreaterEqual(
+            params.user_turn_strategies.stop[0]._user_speech_timeout,
+            0.5,
+        )
+        self.assertGreater(
+            server.USER_TURN_STOP_TIMEOUT_SECS,
+            server.USER_SPEECH_TIMEOUT_SECS,
+        )
+        self.assertLess(server.DEEPGRAM_ENDPOINTING_MS, 400)
         self.assertEqual(server.LIVEKIT_AUDIO_OUT_10MS_CHUNKS, 4)
         self.assertLessEqual(server.VOICE_MAX_TOKENS, 100)
-        self.assertEqual(len(params.user_turn_strategies.start), 1)
+        self.assertEqual(len(params.user_turn_strategies.start), 2)
         self.assertIsInstance(
             params.user_turn_strategies.start[0],
+            server.VADUserTurnStartStrategy,
+        )
+        self.assertTrue(params.user_turn_strategies.start[0]._enable_interruptions)
+        self.assertIsInstance(
+            params.user_turn_strategies.start[1],
             server.TranscriptionUserTurnStartStrategy,
         )
         self.assertIsInstance(

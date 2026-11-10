@@ -1671,52 +1671,6 @@ a {
   cursor: not-allowed;
 }
 
-/* Text pipeline (Phase 1) */
-.pipeline-chat {
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  grid-template-columns: 1fr;
-}
-
-@media (min-width: 900px) {
-  .pipeline-chat {
-    grid-template-columns: 1fr 280px;
-    grid-template-rows: auto 1fr auto;
-  }
-
-  .pipeline-metrics {
-    grid-column: 2;
-    grid-row: 1 / 4;
-    border-left: 1px solid var(--border);
-  }
-
-  .pipeline-messages {
-    grid-column: 1;
-  }
-
-  .pipeline-compose {
-    grid-column: 1;
-  }
-
-  .voice-chat-error {
-    grid-column: 1 / -1;
-  }
-}
-
-.pipeline-chat .voice-chat-error {
-  margin: 0;
-  padding: 0.6rem 1.25rem;
-  background: rgba(197, 48, 48, 0.08);
-  border-top: 1px solid rgba(197, 48, 48, 0.18);
-}
-
-.pipeline-metrics {
-  padding: 1rem 1.25rem;
-  background: var(--bg-elevated);
-  font-size: 0.82rem;
-  transition: background 0.4s ease;
-}
-
 .typing-dots {
   display: inline-flex;
   align-items: center;
@@ -1738,81 +1692,6 @@ a {
 
 .typing-dots span:nth-child(3) {
   animation-delay: 0.3s;
-}
-
-.pipeline-metrics-title {
-  margin: 0 0 0.75rem;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted);
-}
-
-.pipeline-metrics-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem 0.75rem;
-  margin: 0;
-}
-
-.pipeline-metrics-grid dt {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.72rem;
-}
-
-.pipeline-metrics-grid dd {
-  margin: 0;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.pipeline-metrics-empty,
-.pipeline-metrics-meta {
-  margin: 0;
-  color: var(--text-muted);
-  line-height: 1.4;
-}
-
-.pipeline-metrics-meta {
-  margin-top: 0.75rem;
-  font-size: 0.75rem;
-}
-
-.pipeline-crisis-flag {
-  margin: 0.75rem 0 0;
-  padding: 0.5rem 0.65rem;
-  border-radius: 8px;
-  background: rgba(220, 100, 100, 0.08);
-  border: 1px solid rgba(220, 100, 100, 0.25);
-  color: #9b2c2c;
-  font-size: 0.78rem;
-}
-
-.pipeline-summary-preview {
-  margin-top: 0.75rem;
-}
-
-.pipeline-summary-preview summary {
-  cursor: pointer;
-  color: var(--accent);
-  font-size: 0.78rem;
-}
-
-.pipeline-summary-preview p {
-  margin: 0.5rem 0 0;
-  color: var(--text-muted);
-  line-height: 1.45;
-  font-size: 0.78rem;
-}
-
-.pipeline-compose {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  padding: 1rem 1.25rem;
-  border-top: 1px solid var(--border);
 }
 
 .crisis-modal-backdrop {
