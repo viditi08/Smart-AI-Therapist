@@ -47,15 +47,19 @@ class VoiceServerTests(unittest.TestCase):
         with patch.dict(os.environ, settings, clear=True):
             self.assertEqual(server.missing_settings(), [])
             llm, provider, model = server.create_llm("Test Emma prompt")
+            self.assertEqual(
+                server.gemini_model_chain()[:2],
+                ["gemini-3.1-flash-lite", "gemini-flash-latest"],
+            )
         self.assertEqual(provider, "google")
         self.assertEqual(model, "gemini-3.1-flash-lite")
-        self.assertEqual(
-            server.gemini_model_chain()[:2],
-            ["gemini-3.1-flash-lite", "gemini-flash-lite-latest"],
-        )
         self.assertIsInstance(llm, server.EmmaGeminiLLMService)
         self.assertIn("generativelanguage.googleapis.com", str(llm._client.base_url))
         self.assertEqual(llm._settings.extra.get("extra_body"), {"reasoning_effort": "minimal"})
+
+    def test_default_gemini_model_avoids_overloaded_flash_lite(self):
+        self.assertEqual(server.DEFAULT_GEMINI_MODEL, "gemini-2.5-flash")
+        self.assertEqual(server.gemini_model_chain()[0], "gemini-2.5-flash")
 
     def test_gemini_fallback_skips_duplicates(self):
         with patch.dict(
@@ -230,6 +234,8 @@ class VoiceServerTests(unittest.TestCase):
             server.USER_TURN_STOP_TIMEOUT_SECS,
             server.USER_SPEECH_TIMEOUT_SECS,
         )
+        self.assertEqual(params.vad_analyzer._params.stop_secs, server.VAD_STOP_SECS)
+        self.assertLess(server.VAD_STOP_SECS, server.DEEPGRAM_TTFS_P99_LATENCY)
         self.assertLess(server.DEEPGRAM_ENDPOINTING_MS, 400)
         self.assertEqual(server.LIVEKIT_AUDIO_OUT_10MS_CHUNKS, 4)
         self.assertLessEqual(server.VOICE_MAX_TOKENS, 100)

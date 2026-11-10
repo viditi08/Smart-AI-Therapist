@@ -86,14 +86,14 @@ ORIGINS = [value.strip() for value in os.getenv(
 VERCEL_ORIGIN = re.compile(r"^https://([a-z0-9-]+\.)*vercel\.app$")
 tasks: set[asyncio.Task] = set()
 session_lock = asyncio.Lock()
-DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
-# 3.1-flash-lite is fast but Google often returns 503 under load. These
-# stay in the same Gemini family so a capacity miss still produces speech.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+# 3.1-flash-lite is fast but Google often returns 503 under load. Use a
+# higher-capacity Flash model first so a refresh does not hit the same outage.
 DEFAULT_GEMINI_FALLBACKS = (
-    "gemini-flash-lite-latest",
     "gemini-flash-latest",
-    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
 )
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SILENT_MIC_PEAK = 400
@@ -102,6 +102,8 @@ QUIET_MIC_CHUNKS = 750
 VOICE_MAX_TOKENS = 96
 USER_TURN_STOP_TIMEOUT_SECS = 0.9
 USER_SPEECH_TIMEOUT_SECS = 0.55
+VAD_STOP_SECS = 0.2
+DEEPGRAM_TTFS_P99_LATENCY = 0.35
 DEEPGRAM_ENDPOINTING_MS = 300
 LIVEKIT_AUDIO_OUT_10MS_CHUNKS = 4
 
@@ -400,7 +402,7 @@ def voice_user_params() -> LLMUserAggregatorParams:
             params=VADParams(
                 confidence=0.8,
                 start_secs=0.18,
-                stop_secs=0.4,
+                stop_secs=VAD_STOP_SECS,
                 min_volume=0.7,
             ),
         ),
@@ -486,7 +488,7 @@ def create_worker(room_name: str, bot_token: str, user_name: str | None = None):
     logger.info("Voice dialogue provider/model: {}/{}", provider, dialogue_model)
     stt = EmmaDeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
-        ttfs_p99_latency=0.35,
+        ttfs_p99_latency=DEEPGRAM_TTFS_P99_LATENCY,
         settings=DeepgramSTTService.Settings(
             model="nova-3",
             language="en",
