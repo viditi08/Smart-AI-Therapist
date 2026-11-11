@@ -4,7 +4,7 @@
   "crons": [
     {
       "path": "/api/voice/wake",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 14 * * *"
     }
   ]
 }
